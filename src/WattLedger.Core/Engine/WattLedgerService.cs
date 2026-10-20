@@ -294,7 +294,12 @@ public sealed class WattLedgerService : IDisposable
             .Select(v => v!.Value)
             .ToArray();
 
-        return values.Length > 0 ? values.Average() : null;
+        if (values.Length > 0)
+        {
+            return values.Average();
+        }
+
+        return EnergyIntegrator.EstimateAverageWatts(_recentSamples.ToArray());
     }
 
     private void CloseCurrentSession()

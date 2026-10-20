@@ -196,15 +196,21 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private void ApplyStatus(LedgerStatus status)
     {
         var battery = status.Battery;
+        var discharge = battery.DischargeWatts
+                        ?? (battery.IsDischarging ? status.RecentAverageWatts : null);
+        var charge = battery.ChargeWatts
+                     ?? (battery.IsCharging && status.RecentAverageWatts is < 0 ? -status.RecentAverageWatts : null);
+        var powerEstimated = (battery.IsDischarging && battery.DischargeWatts is null && discharge is not null) ||
+                             (battery.IsCharging && battery.ChargeWatts is null && charge is not null);
 
-        if (battery.IsDischarging && battery.DischargeWatts is { } discharge)
+        if (battery.IsDischarging && discharge is { } dischargeWatts)
         {
-            PowerText = $"-{discharge:0.0} W";
+            PowerText = $"-{dischargeWatts:0.0} W";
             PowerBrush = GreenBrush;
         }
-        else if (battery.IsCharging && battery.ChargeWatts is { } charge)
+        else if (battery.IsCharging && charge is { } chargeWattsValue)
         {
-            PowerText = $"+{charge:0.0} W";
+            PowerText = $"+{chargeWattsValue:0.0} W";
             PowerBrush = BlueBrush;
         }
         else
@@ -216,6 +222,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         PowerDetailText = status.Rapl.PackageWatts is { } package
             ? $"SoC {package:0.0} W · CPU {status.Rapl.CpuWatts.GetValueOrDefault():0.0} W · GPU {status.Rapl.GpuWatts.GetValueOrDefault():0.0} W"
             : "RAPL / Energy Meter unavailable";
+
+        if (powerEstimated)
+        {
+            PowerDetailText += " · estimated from capacity";
+        }
 
         BatteryText = FormatPercent(battery.Percent);
 

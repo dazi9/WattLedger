@@ -1,3 +1,5 @@
+using WattLedger.Core.Models;
+
 namespace WattLedger.Core.Engine;
 
 public static class EnergyIntegrator
@@ -42,5 +44,37 @@ public static class EnergyIntegrator
     public static double AverageWatts(double energyWh, TimeSpan duration)
     {
         return duration.TotalHours > 0 ? energyWh / duration.TotalHours : 0;
+    }
+
+    /// <summary>
+    /// Estimates average net power from the battery's remaining-capacity counter.
+    /// Used when the firmware does not report a rate; positive means discharge.
+    /// </summary>
+    public static double? EstimateAverageWatts(IReadOnlyList<SampleRecord> samples)
+    {
+        var withCapacity = samples
+            .Where(s => s.RemainingMwh is > 0)
+            .ToArray();
+
+        if (withCapacity.Length < 2)
+        {
+            return null;
+        }
+
+        var first = withCapacity[0];
+        var last = withCapacity[^1];
+        var hours = (last.Timestamp - first.Timestamp).TotalHours;
+        if (hours <= 0)
+        {
+            return null;
+        }
+
+        var energyWh = (first.RemainingMwh!.Value - last.RemainingMwh!.Value) / 1000.0;
+        if (Math.Abs(energyWh) < 0.001)
+        {
+            return null;
+        }
+
+        return energyWh / hours;
     }
 }

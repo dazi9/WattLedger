@@ -75,7 +75,19 @@ internal static class Program
         table.AddRow("State", battery.IsAcOnline
             ? (battery.IsCharging ? "AC · charging" : "AC · idle")
             : "Battery · discharging");
-        table.AddRow("Battery power", battery.IsDischarging ? $"{FormatWatts(battery.DischargeWatts)} out" : $"{FormatWatts(battery.ChargeWatts)} in");
+        var discharge = battery.DischargeWatts
+                        ?? (battery.IsDischarging ? status.RecentAverageWatts : null);
+        var charge = battery.ChargeWatts
+                     ?? (battery.IsCharging && status.RecentAverageWatts is < 0 ? -status.RecentAverageWatts : null);
+        var estimated = (battery.IsDischarging && battery.DischargeWatts is null && discharge is not null) ||
+                        (battery.IsCharging && battery.ChargeWatts is null && charge is not null);
+        var powerText = battery.IsDischarging
+            ? $"{FormatWatts(discharge)} out{(estimated ? " (estimated)" : "")}"
+            : battery.IsCharging
+                ? $"{FormatWatts(charge)} in{(estimated ? " (estimated)" : "")}"
+                : "—";
+
+        table.AddRow("Battery power", powerText);
         table.AddRow("Voltage", battery.VoltageMv is { } v ? $"{v / 1000.0:0.000} V" : "—");
         table.AddRow("Health", battery.HealthPercent is { } h ? $"{h:0.0}%" : "—");
         table.AddRow("Cycles", battery.CycleCount?.ToString(CultureInfo.InvariantCulture) ?? "—");

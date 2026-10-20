@@ -33,6 +33,21 @@ public sealed class EnergyIntegratorTests
         Assert.Equal(20, EnergyIntegrator.CapacityDeltaWh(60_000, 40_000), 6);
         Assert.Equal(-10, EnergyIntegrator.CapacityDeltaWh(40_000, 50_000), 6);
     }
+
+    [Fact]
+    public void EstimateAverageWatts_UsesCapacityDelta()
+    {
+        var start = new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.FromHours(8));
+        var samples = new[]
+        {
+            new SampleRecord { Timestamp = start, RemainingMwh = 60_000 },
+            new SampleRecord { Timestamp = start.AddHours(1), RemainingMwh = 54_000 }
+        };
+
+        var estimate = EnergyIntegrator.EstimateAverageWatts(samples);
+        Assert.NotNull(estimate);
+        Assert.Equal(6.0, estimate!.Value, 6);
+    }
 }
 
 public sealed class SessionTrackerTests
