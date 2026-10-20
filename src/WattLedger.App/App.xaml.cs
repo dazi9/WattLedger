@@ -67,7 +67,8 @@ public partial class App : Application
         var tray = new TaskbarIcon
         {
             Icon = TrayIconFactory.Create(),
-            ToolTipText = "WattLedger"
+            ToolTipText = "WattLedger",
+            Visibility = Visibility.Visible
         };
 
         tray.TrayMouseDoubleClick += (_, _) => ShowMainWindow();

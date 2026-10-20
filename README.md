@@ -41,7 +41,7 @@ WattLedger is deliberately narrow:
 ## Quick start
 
 ```powershell
-git clone <your-fork-url> WattLedger
+git clone https://github.com/your-name/WattLedger.git
 cd WattLedger
 
 dotnet build WattLedger.slnx -c Release
@@ -73,6 +73,17 @@ The app and CLI share the same database:
 ```
 
 Delete the file to reset history. Export before deleting if you want to keep it.
+
+### Demo data for screenshots / UI work
+
+The screenshot in this README is generated from synthetic data, not from a real user's history:
+
+```powershell
+python tools/seed-demo.py --db demo.db
+dotnet run --project src/WattLedger.App -- --db demo.db
+```
+
+The script refuses to touch a database named `wattledger.db` unless you pass `--force`.
 
 ### Self-contained release
 
@@ -146,7 +157,7 @@ See [docs/PRIVACY.md](docs/PRIVACY.md).
 - RAPL / `Energy Meter` availability varies by CPU and firmware. `wattledger diag` shows what your machine exposes.
 - Per-app energy attribution is not part of v0.1. Windows does not provide a precise public per-app energy API; v0.2 will use CPU/GPU time-share estimates and label them as estimates.
 - If the app is not running during a sleep period, that standby session cannot be reconstructed. Run it from the tray or enable “Start with Windows” for continuous history.
-- Tested primarily on a MECHREVO WUJIE (Intel Core Ultra 5 226V, Windows 11 26200). Community reports for other laptops are welcome.
+- Tested primarily on a MECHREVO WUJIE (Intel Core Ultra 5 226V, Windows 11 26200). See [docs/supported-hardware.md](docs/supported-hardware.md); community reports for other laptops are welcome.
 
 ## Contributing
 

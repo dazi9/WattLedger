@@ -43,7 +43,7 @@ public static class ReportBuilder
         var standbySeconds = standbySessions.Sum(s => s.DurationSeconds);
         var acSeconds = acSessions.Sum(s => s.DurationSeconds);
 
-        var latest = database.GetLatestSample();
+        var latest = database.GetLatestSample(start, end);
 
         return new DayReport
         {

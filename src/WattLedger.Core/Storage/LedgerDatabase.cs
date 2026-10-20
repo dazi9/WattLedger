@@ -243,30 +243,7 @@ public sealed class LedgerDatabase
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            results.Add(new SampleRecord
-            {
-                Id = reader.GetInt64(0),
-                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)),
-                PowerState = reader.GetString(2),
-                BatteryPercent = GetNullableInt(reader, 3),
-                RemainingMwh = GetNullableLong(reader, 4),
-                FullChargeMwh = GetNullableLong(reader, 5),
-                DesignMwh = GetNullableLong(reader, 6),
-                VoltageMv = GetNullableInt(reader, 7),
-                DischargeMw = GetNullableLong(reader, 8),
-                ChargeMw = GetNullableLong(reader, 9),
-                IsAcOnline = reader.GetInt32(10) != 0,
-                IsCharging = reader.GetInt32(11) != 0,
-                IsDischarging = reader.GetInt32(12) != 0,
-                RaplPackageWatts = GetNullableDouble(reader, 13),
-                RaplCpuWatts = GetNullableDouble(reader, 14),
-                RaplGpuWatts = GetNullableDouble(reader, 15),
-                RaplDramWatts = GetNullableDouble(reader, 16),
-                BrightnessPercent = GetNullableInt(reader, 17),
-                ForegroundProcess = GetNullableString(reader, 18),
-                CycleCount = GetNullableInt(reader, 19),
-                DeviceName = GetNullableString(reader, 20)
-            });
+            results.Add(ReadSample(reader));
         }
 
         if (maxPoints > 0 && results.Count > maxPoints)
@@ -289,35 +266,26 @@ public sealed class LedgerDatabase
             FROM samples ORDER BY ts DESC LIMIT 1;
             """;
         using var reader = command.ExecuteReader();
-        if (!reader.Read())
-        {
-            return null;
-        }
+        return reader.Read() ? ReadSample(reader) : null;
+    }
 
-        return new SampleRecord
-        {
-            Id = reader.GetInt64(0),
-            Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)),
-            PowerState = reader.GetString(2),
-            BatteryPercent = GetNullableInt(reader, 3),
-            RemainingMwh = GetNullableLong(reader, 4),
-            FullChargeMwh = GetNullableLong(reader, 5),
-            DesignMwh = GetNullableLong(reader, 6),
-            VoltageMv = GetNullableInt(reader, 7),
-            DischargeMw = GetNullableLong(reader, 8),
-            ChargeMw = GetNullableLong(reader, 9),
-            IsAcOnline = reader.GetInt32(10) != 0,
-            IsCharging = reader.GetInt32(11) != 0,
-            IsDischarging = reader.GetInt32(12) != 0,
-            RaplPackageWatts = GetNullableDouble(reader, 13),
-            RaplCpuWatts = GetNullableDouble(reader, 14),
-            RaplGpuWatts = GetNullableDouble(reader, 15),
-            RaplDramWatts = GetNullableDouble(reader, 16),
-            BrightnessPercent = GetNullableInt(reader, 17),
-            ForegroundProcess = GetNullableString(reader, 18),
-            CycleCount = GetNullableInt(reader, 19),
-            DeviceName = GetNullableString(reader, 20)
-        };
+    public SampleRecord? GetLatestSample(DateTimeOffset from, DateTimeOffset to)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, ts, power_state, battery_percent, remaining_mwh, full_charge_mwh,
+                   design_mwh, voltage_mv, discharge_mw, charge_mw, is_ac, is_charging,
+                   is_discharging, rapl_pkg_w, rapl_cpu_w, rapl_gpu_w, rapl_dram_w,
+                   brightness_pct, foreground_process, cycle_count, device_name
+            FROM samples
+            WHERE ts >= $from AND ts <= $to
+            ORDER BY ts DESC LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$from", from.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("$to", to.ToUnixTimeMilliseconds());
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadSample(reader) : null;
     }
 
     public void InsertHealth(HealthRecord health)
@@ -396,7 +364,8 @@ public sealed class LedgerDatabase
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT date(start_ts / 1000, 'unixepoch', 'localtime') AS day,
-                   SUM(CASE WHEN energy_wh > 0 THEN energy_wh ELSE 0 END) AS discharge_wh,
+                   SUM(CASE WHEN type = 'Battery' AND energy_wh > 0 THEN energy_wh ELSE 0 END) AS active_wh,
+                   SUM(CASE WHEN type = 'ModernStandby' AND energy_wh > 0 THEN energy_wh ELSE 0 END) AS standby_wh,
                    SUM(CASE WHEN energy_wh < 0 THEN -energy_wh ELSE 0 END) AS charge_wh,
                    SUM(CASE WHEN type = 'Battery' THEN duration_seconds ELSE 0 END) AS active_seconds,
                    SUM(CASE WHEN type = 'ModernStandby' THEN duration_seconds ELSE 0 END) AS standby_seconds
@@ -421,10 +390,11 @@ public sealed class LedgerDatabase
             results.Add(new DailySummary
             {
                 Date = day,
-                DischargeWh = reader.GetDouble(1),
-                ChargeWh = reader.GetDouble(2),
-                ActiveSeconds = reader.GetDouble(3),
-                StandbySeconds = reader.GetDouble(4)
+                ActiveWh = reader.GetDouble(1),
+                StandbyWh = reader.GetDouble(2),
+                ChargeWh = reader.GetDouble(3),
+                ActiveSeconds = reader.GetDouble(4),
+                StandbySeconds = reader.GetDouble(5)
             });
         }
 
@@ -483,6 +453,34 @@ public sealed class LedgerDatabase
         }
 
         return result;
+    }
+
+    private static SampleRecord ReadSample(SqliteDataReader reader)
+    {
+        return new SampleRecord
+        {
+            Id = reader.GetInt64(0),
+            Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)),
+            PowerState = reader.GetString(2),
+            BatteryPercent = GetNullableInt(reader, 3),
+            RemainingMwh = GetNullableLong(reader, 4),
+            FullChargeMwh = GetNullableLong(reader, 5),
+            DesignMwh = GetNullableLong(reader, 6),
+            VoltageMv = GetNullableInt(reader, 7),
+            DischargeMw = GetNullableLong(reader, 8),
+            ChargeMw = GetNullableLong(reader, 9),
+            IsAcOnline = reader.GetInt32(10) != 0,
+            IsCharging = reader.GetInt32(11) != 0,
+            IsDischarging = reader.GetInt32(12) != 0,
+            RaplPackageWatts = GetNullableDouble(reader, 13),
+            RaplCpuWatts = GetNullableDouble(reader, 14),
+            RaplGpuWatts = GetNullableDouble(reader, 15),
+            RaplDramWatts = GetNullableDouble(reader, 16),
+            BrightnessPercent = GetNullableInt(reader, 17),
+            ForegroundProcess = GetNullableString(reader, 18),
+            CycleCount = GetNullableInt(reader, 19),
+            DeviceName = GetNullableString(reader, 20)
+        };
     }
 
     private static int? GetNullableInt(SqliteDataReader reader, int ordinal) =>
