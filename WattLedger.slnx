@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WattLedger.App/WattLedger.App.csproj" />
+    <Project Path="src/WattLedger.Cli/WattLedger.Cli.csproj" />
+    <Project Path="src/WattLedger.Core/WattLedger.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WattLedger.Core.Tests/WattLedger.Core.Tests.csproj" />
+  </Folder>
+</Solution>

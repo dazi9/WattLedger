@@ -1,0 +1,152 @@
+﻿<Window x:Class="WattLedger.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WattLedger"
+        Height="800"
+        Width="1120"
+        MinHeight="640"
+        MinWidth="960"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource WindowBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}"
+        FontFamily="Segoe UI Variable Text, Segoe UI"
+        TextOptions.TextFormattingMode="Display">
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="3*" />
+            <RowDefinition Height="2*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <StackPanel>
+                <TextBlock Text="WattLedger" Style="{StaticResource TitleText}" />
+                <TextBlock Text="Local-first battery energy journal" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
+            </StackPanel>
+
+            <Border HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Background="{StaticResource CardBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="20"
+                    Padding="14,7">
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="8" Height="8" Fill="{Binding StateBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding StateText}"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <UniformGrid Grid.Row="1" Columns="4" Margin="0,22,0,0">
+            <Border Style="{StaticResource Card}" Margin="0,0,12,0">
+                <StackPanel>
+                    <TextBlock Text="LIVE POWER" Style="{StaticResource MetricLabel}" />
+                    <TextBlock Text="{Binding PowerText}" Style="{StaticResource MetricValue}" Foreground="{Binding PowerBrush}" Margin="0,6,0,0" />
+                    <TextBlock Text="{Binding PowerDetailText}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,0,12,0">
+                <StackPanel>
+                    <TextBlock Text="BATTERY" Style="{StaticResource MetricLabel}" />
+                    <TextBlock Text="{Binding BatteryText}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                    <TextBlock Text="{Binding BatteryDetailText}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,0,12,0">
+                <StackPanel>
+                    <TextBlock Text="TIME LEFT" Style="{StaticResource MetricLabel}" />
+                    <TextBlock Text="{Binding TimeLeftText}" Style="{StaticResource MetricValue}" Foreground="{StaticResource BlueBrush}" Margin="0,6,0,0" />
+                    <TextBlock Text="{Binding TimeLeftDetailText}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="TODAY" Style="{StaticResource MetricLabel}" />
+                    <TextBlock Text="{Binding TodayEnergyText}" Style="{StaticResource MetricValue}" Foreground="{StaticResource GreenBrush}" Margin="0,6,0,0" />
+                    <TextBlock Text="{Binding TodayDetailText}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+        </UniformGrid>
+
+        <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,12,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <TextBlock Text="Power &amp; battery · today" Style="{StaticResource SectionTitle}" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Rectangle Width="18" Height="2" Fill="{StaticResource GreenBrush}" Margin="0,0,6,0" />
+                        <TextBlock Text="Power" Style="{StaticResource SubtleText}" Margin="0,0,16,0" />
+                        <Rectangle Width="18" Height="2" Fill="{StaticResource BlueBrush}" Margin="0,0,6,0" />
+                        <TextBlock Text="Battery" Style="{StaticResource SubtleText}" />
+                    </StackPanel>
+                </Grid>
+
+                <Canvas x:Name="ChartCanvas"
+                        Grid.Row="1"
+                        Height="210"
+                        Margin="0,8,0,0"
+                        ClipToBounds="True"
+                        SizeChanged="ChartCanvas_SizeChanged" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,12,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <TextBlock Text="Today's ledger" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Text="{Binding StatusText}"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource SubtleText}" />
+                </Grid>
+
+                <DataGrid x:Name="SessionsGrid"
+                          Grid.Row="1"
+                          Margin="0,8,0,0"
+                          ItemsSource="{Binding Sessions}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="START" Binding="{Binding Start}" Width="90" />
+                        <DataGridTextColumn Header="END" Binding="{Binding End}" Width="90" />
+                        <DataGridTextColumn Header="STATE" Binding="{Binding State}" Width="*" />
+                        <DataGridTextColumn Header="DURATION" Binding="{Binding Duration}" Width="110" />
+                        <DataGridTextColumn Header="BATTERY" Binding="{Binding Battery}" Width="130" />
+                        <DataGridTextColumn Header="ENERGY" Binding="{Binding Energy}" Width="100" />
+                        <DataGridTextColumn Header="AVG W" Binding="{Binding Average}" Width="90" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="4" Margin="0,14,0,0">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="Export CSV" Click="ExportCsv_Click" />
+                <Button Content="Export report" Click="ExportReport_Click" />
+                <Button Content="Open data folder" Click="OpenData_Click" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="AutostartButton" Content="Start with Windows" Click="Autostart_Click" />
+                <Button Content="Hide to tray" Click="Hide_Click" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

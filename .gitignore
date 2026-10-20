@@ -1,0 +1,33 @@
+# Build output
+bin/
+obj/
+artifacts/
+.vs/
+*.user
+*.suo
+
+# Local SDK / tools
+.tools/
+.dotnet/
+
+# Runtime data
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Local exports and scratch files
+/screenshot*.png
+/window*.png
+/demo-*.png
+/watch-*.txt
+/samples.csv
+/report.md
+/wattledger-*.csv
+/wattledger-*.json
+/wattledger-*.md
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
