@@ -172,12 +172,17 @@ public sealed class LinuxBatteryReaderTests
     [Fact]
     public void DefaultDatabasePathPreservesWindowsAndUsesAbsoluteXdgDataHome()
     {
-        Assert.Equal(Path.Combine("C:\\Users\\tester\\AppData\\Local", "WattLedger", "wattledger.db"),
-            LedgerDatabase.GetDefaultDatabasePath(true, "C:\\Users\\tester\\AppData\\Local", "/ignored", "/home/tester"));
-        Assert.Equal(Path.Combine("/data", "wattledger", "wattledger.db"),
-            LedgerDatabase.GetDefaultDatabasePath(false, "", "/data", "/home/tester"));
-        Assert.Equal(Path.Combine("/home/tester", ".local", "share", "wattledger", "wattledger.db"),
-            LedgerDatabase.GetDefaultDatabasePath(false, "", "relative/data", "/home/tester"));
+        var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "wattledger-path-fixture"));
+        var localAppData = Path.Combine(root, "Local");
+        var dataHome = Path.Combine(root, "data");
+        var userProfile = Path.Combine(root, "home", "tester");
+
+        Assert.Equal(Path.Combine(localAppData, "WattLedger", "wattledger.db"),
+            LedgerDatabase.GetDefaultDatabasePath(true, localAppData, dataHome, userProfile));
+        Assert.Equal(Path.Combine(dataHome, "wattledger", "wattledger.db"),
+            LedgerDatabase.GetDefaultDatabasePath(false, "", dataHome, userProfile));
+        Assert.Equal(Path.Combine(userProfile, ".local", "share", "wattledger", "wattledger.db"),
+            LedgerDatabase.GetDefaultDatabasePath(false, "", Path.Combine("relative", "data"), userProfile));
     }
 
     [Fact]
