@@ -34,9 +34,9 @@ public static class DiagnosticsService
             DatabasePath = database.DatabasePath,
             SampleCount = database.GetSampleCount(),
             SessionCount = database.GetSessionCount(),
-            BatteryDevices = service.BatteryReader.ReadDevices(),
-            RaplMilliwatts = service.EnergyMeter.ReadRawMilliwatts(),
-            BrightnessPercent = service.BrightnessReader.Read(force: true),
+            BatteryDevices = service.ReadBatteryDevices(),
+            RaplMilliwatts = service.ReadRawEnergyMilliwatts(),
+            BrightnessPercent = service.ReadBrightnessForDiagnostics(),
             Health = database.GetLatestHealth()
         };
     }

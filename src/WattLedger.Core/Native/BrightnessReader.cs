@@ -10,6 +10,11 @@ public sealed class BrightnessReader
 
     public int? Read(bool force = false)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
         lock (_gate)
         {
             var now = DateTimeOffset.Now;

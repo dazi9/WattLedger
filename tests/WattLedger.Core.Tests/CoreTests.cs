@@ -100,6 +100,52 @@ public sealed class SessionTrackerTests
         Assert.True(session.EnergyWh > 0);
     }
 
+    [Fact]
+    public void LinuxSleepGapCanRecordConfirmedSuspendResumeAndUnavailableEnergy()
+    {
+        var start = DateTimeOffset.UtcNow;
+        var tracker = new SessionTracker();
+        tracker.Add(Sample(start, ac: false, percent: 80, remaining: 0, rate: null) with { RemainingMwh = null });
+
+        var result = tracker.Add(
+            Sample(start.AddHours(1), ac: false, percent: 80, remaining: 0, rate: null) with { RemainingMwh = null },
+            "SleepGap",
+            gapConfirmedBySuspendEvents: true);
+
+        var sleep = Assert.Single(result.Completed, session => session.Type == "SleepGap");
+        Assert.Contains("Suspend/resume event confirmed", sleep.Note!);
+        Assert.Contains("battery energy unavailable", sleep.Note!);
+        Assert.Equal(0d, sleep.EnergyWh);
+    }
+
+    [Fact]
+    public void OnlyConfirmedShortLinuxSuspendGapIsSeparatedFromActiveSession()
+    {
+        var start = DateTimeOffset.UtcNow;
+        var confirmedTracker = new SessionTracker();
+        confirmedTracker.Add(Sample(start, ac: false, percent: 80, remaining: 50_000, rate: 5_000));
+
+        var confirmed = confirmedTracker.Add(
+            Sample(start.AddSeconds(10), ac: false, percent: 80, remaining: 50_000, rate: 5_000),
+            "SleepGap",
+            gapConfirmedBySuspendEvents: true);
+
+        var sleep = Assert.Single(confirmed.Completed, session => session.Type == "SleepGap");
+        Assert.Equal(10, sleep.DurationSeconds);
+        Assert.Contains("Suspend/resume event confirmed", sleep.Note!);
+        Assert.Equal("Battery", confirmed.Current!.Type);
+
+        var unconfirmedTracker = new SessionTracker();
+        unconfirmedTracker.Add(Sample(start, ac: false, percent: 80, remaining: 50_000, rate: 5_000));
+        var unconfirmed = unconfirmedTracker.Add(
+            Sample(start.AddSeconds(10), ac: false, percent: 80, remaining: 50_000, rate: 5_000),
+            "SleepGap");
+
+        Assert.Empty(unconfirmed.Completed);
+        Assert.Equal("Battery", unconfirmed.Current!.Type);
+        Assert.Equal(10, unconfirmed.Current.DurationSeconds);
+    }
+
     private static SampleRecord Sample(
         DateTimeOffset timestamp,
         bool ac,

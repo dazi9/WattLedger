@@ -8,6 +8,7 @@ public sealed record DailySummary
     public double ChargeWh { get; init; }
     public double ActiveSeconds { get; init; }
     public double StandbySeconds { get; init; }
+    public bool StandbyEnergyIncomplete { get; init; }
 
     public double DischargeWh => ActiveWh + StandbyWh;
     public double ActiveHours => ActiveSeconds / 3600.0;
