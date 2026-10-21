@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=WattLedger
+Comment=Local laptop battery energy journal
+Exec=/usr/bin/wattledger-desktop
+Icon=wattledger
+Terminal=false
+Categories=System;Monitor;
+StartupNotify=true

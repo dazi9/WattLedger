@@ -2,6 +2,13 @@
 
 All notable changes to WattLedger are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Initial Linux CLI and GNOME desktop packaging, build, and migration documentation.
+- Linux battery readings from sysfs with unit conversion and `SleepGap` compatibility; session notes distinguish observed logind suspend/resume pairs from timestamp-inferred gaps, and reports flag unavailable standby energy. See the Linux port plan for scope and validation status.
+
 ## [0.1.0] - 2026-10-20
 
 ### Added

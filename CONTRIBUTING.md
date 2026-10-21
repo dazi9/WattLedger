@@ -1,11 +1,11 @@
 # Contributing to WattLedger
 
-Thanks for helping. WattLedger is a small, focused tool: an energy journal for Windows laptops, not a general hardware dashboard.
+Thanks for helping. WattLedger is a small, focused tool: an energy journal for laptops, not a general hardware dashboard.
 
 ## Ground rules
 
-- **No kernel drivers.** Use documented Windows APIs, IOCTLs, PDH counters, and ETW.
-- **No administrator requirement** for the core experience.
+- **No kernel drivers.** Use documented Windows APIs on Windows and standard readable interfaces such as Linux sysfs and logind on Linux.
+- **No administrator requirement** for basic battery readings.
 - **No network / telemetry.** Local-only is a feature.
 - **Label estimates.** If a number is modelled rather than measured, say so in the UI and docs.
 - **Keep the core UI-free.** `WattLedger.Core` must not reference WPF.
@@ -15,6 +15,14 @@ Thanks for helping. WattLedger is a small, focused tool: an energy journal for W
 ```powershell
 dotnet restore WattLedger.slnx
 dotnet build WattLedger.slnx -c Release
+dotnet test tests/WattLedger.Core.Tests/WattLedger.Core.Tests.csproj -c Release
+```
+
+The Windows solution includes the WPF application. For Linux, build the platform solution:
+
+```sh
+dotnet restore WattLedger.Linux.slnx
+dotnet build WattLedger.Linux.slnx -c Release
 dotnet test tests/WattLedger.Core.Tests/WattLedger.Core.Tests.csproj -c Release
 ```
 
@@ -37,7 +45,7 @@ dotnet run --project src/WattLedger.App
 
 ```
 src/WattLedger.Core/
-  Native/       SetupAPI + battery IOCTL, PDH Energy Meter, power status
+  Native/       Windows battery IOCTL / Energy Meter and Linux sysfs / logind readers
   Engine/       energy integration, session tracker, service loop, diagnostics
   Storage/      SQLite schema and queries
   Reporting/    day reports and CSV/JSON/Markdown exporters
@@ -45,6 +53,7 @@ src/WattLedger.Core/
 
 src/WattLedger.Cli/   status / watch / today / export / diag
 src/WattLedger.App/   WPF tray app + dashboard
+src/WattLedger.Linux/ Avalonia desktop app for Linux
 tests/                unit tests for the energy and session engines
 ```
 
@@ -87,7 +96,7 @@ Useful cases:
 - C# 13 / .NET 10, nullable enabled.
 - 4-space indentation, file-scoped namespaces, `var` when the type is obvious.
 - Prefer immutable records for data crossing layers.
-- Keep platform interop in `Core/Native`; do not leak P/Invoke into UI code.
+- Keep platform interop and sensor access in `Core/Native`; do not leak platform APIs into UI code.
 - Use `DateTimeOffset` in the core, UTC milliseconds in SQLite, local time only at the edges.
 
 ## License
