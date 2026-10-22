@@ -17,6 +17,7 @@ public sealed record DayReport
     public double AcSeconds { get; init; }
     public double AverageActiveWatts { get; init; }
     public double AverageStandbyWatts { get; init; }
+    public bool StandbyEnergyIncomplete { get; init; }
     public HealthRecord? Health { get; init; }
     public BatterySnapshot? Battery { get; init; }
 }
@@ -33,7 +34,9 @@ public static class ReportBuilder
             .Where(s => s.DurationSeconds > 0)
             .ToArray();
         var activeSessions = sessions.Where(s => s.Type == "Battery").ToArray();
-        var standbySessions = sessions.Where(s => s.Type == "ModernStandby").ToArray();
+        var standbySessions = sessions.Where(s => s.Type is "ModernStandby" or "SleepGap").ToArray();
+        var standbyEnergyIncomplete = standbySessions.Any(s =>
+            s.Note?.Contains("battery energy unavailable", StringComparison.OrdinalIgnoreCase) == true);
         var acSessions = sessions.Where(s => s.Type is "AC" or "Charging").ToArray();
 
         var activeWh = activeSessions.Sum(s => Math.Max(0, s.EnergyWh));
@@ -56,6 +59,7 @@ public static class ReportBuilder
             AcSeconds = acSeconds,
             AverageActiveWatts = activeSeconds > 0 ? activeWh / (activeSeconds / 3600.0) : 0,
             AverageStandbyWatts = standbySeconds > 0 ? standbyWh / (standbySeconds / 3600.0) : 0,
+            StandbyEnergyIncomplete = standbyEnergyIncomplete,
             Health = database.GetLatestHealth(),
             Battery = latest is null
                 ? null
@@ -137,28 +141,28 @@ public static class ReportBuilder
         var builder = new StringBuilder();
         builder.AppendLine($"# WattLedger — {report.Date:yyyy-MM-dd}");
         builder.AppendLine();
-        builder.AppendLine($"- Battery energy used: **{report.DischargeWh:0.00} Wh**");
+        builder.AppendLine($"- Battery energy used{(report.StandbyEnergyIncomplete ? " (partial; sleep energy unavailable for some gaps)" : "")}: **{report.DischargeWh:0.00} Wh**");
         builder.AppendLine($"- Battery energy charged: **{report.ChargeWh:0.00} Wh**");
         builder.AppendLine($"- Active on battery: **{FormatDuration(report.ActiveSeconds)}**");
-        builder.AppendLine($"- Modern Standby: **{FormatDuration(report.StandbySeconds)}**");
+        builder.AppendLine($"- Sleep / standby: **{FormatDuration(report.StandbySeconds)}**");
         builder.AppendLine($"- Average active power: **{report.AverageActiveWatts:0.0} W**");
-        builder.AppendLine($"- Average standby power: **{report.AverageStandbyWatts:0.0} W**");
+        builder.AppendLine($"- Average standby power: **{(report.StandbyEnergyIncomplete ? "incomplete; some gap energy unavailable" : $"{report.AverageStandbyWatts:0.0} W")}**");
         if (report.Health?.HealthPercent is { } health)
         {
             builder.AppendLine($"- Battery health: **{health:0.0}%**");
         }
 
         builder.AppendLine();
-        builder.AppendLine("| Start | End | State | Duration | Battery | Energy | Avg W |");
-        builder.AppendLine("|---|---|---|---|---:|---:|---:|");
+        builder.AppendLine("| Start | End | State | Duration | Battery | Energy | Avg W | Note |");
+        builder.AppendLine("|---|---|---|---|---:|---:|---:|---|");
         foreach (var session in report.Sessions)
         {
             builder.AppendLine(
-                $"| {session.Start.ToLocalTime():HH:mm:ss} | {session.End.ToLocalTime():HH:mm:ss} | {StateLabel(session.Type)} | {FormatDuration(session.DurationSeconds)} | {FormatPercent(session.StartPercent)} → {FormatPercent(session.EndPercent)} | {session.EnergyWh:0.00} Wh | {session.AverageWatts:0.0} W |");
+                $"| {session.Start.ToLocalTime():HH:mm:ss} | {session.End.ToLocalTime():HH:mm:ss} | {StateLabel(session.Type)} | {FormatDuration(session.DurationSeconds)} | {FormatPercent(session.StartPercent)} → {FormatPercent(session.EndPercent)} | {session.EnergyWh:0.00} Wh | {session.AverageWatts:0.0} W | {session.Note?.Replace("|", "\\|") ?? ""} |");
         }
 
         builder.AppendLine();
-        builder.AppendLine("_Energy is integrated from the battery's discharge rate and calibrated against its remaining-capacity counter. Standby energy is measured from the capacity delta across the sleep gap._");
+        builder.AppendLine("_Energy is integrated from the battery's discharge rate and calibrated against its remaining-capacity counter. Sleep-gap energy is estimated from capacity changes when available; rows without a capacity delta are marked as unavailable._");
 
         File.WriteAllText(path, builder.ToString(), new UTF8Encoding(false));
     }
@@ -175,6 +179,7 @@ public static class ReportBuilder
     {
         "Battery" => "Battery · 清醒",
         "ModernStandby" => "Modern Standby · 待机",
+        "SleepGap" => "Sleep gap",
         "AC" => "AC · 插电",
         "Charging" => "Charging · 充电",
         _ => type

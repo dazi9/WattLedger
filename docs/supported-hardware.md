@@ -1,6 +1,8 @@
 # Supported hardware
 
-WattLedger talks to the standard Windows battery interface and the Windows `Energy Meter` performance counters. Support therefore depends on the laptop firmware and CPU, not on the OEM brand.
+WattLedger reads the standard Windows battery interface and Windows `Energy Meter` counters, or Linux battery data through kernel sysfs. Support therefore depends on the laptop firmware and CPU, not on the OEM brand.
+
+The initial Linux port targets x64 GNOME on Ubuntu 24.04 and Debian 12/13. Local native GNOME checks covered startup, tray quit/socket cleanup, and second-instance activation; actual battery rundown, suspend/resume, hardware coverage, and distro-specific install behavior remain unverified. Do not treat CI images as tested hardware or as evidence that every laptop exposes equivalent sysfs readings.
 
 ## Tested
 

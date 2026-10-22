@@ -11,12 +11,6 @@ public sealed class LedgerDatabase
     public LedgerDatabase(string? databasePath = null)
     {
         DatabasePath = databasePath ?? DefaultDatabasePath;
-        var directory = Path.GetDirectoryName(DatabasePath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = DatabasePath,
@@ -28,11 +22,33 @@ public sealed class LedgerDatabase
 
     public string DatabasePath { get; }
 
-    public static string DefaultDatabasePath =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WattLedger",
-            "wattledger.db");
+    public static string DefaultDatabasePath
+    {
+        get
+        {
+            return GetDefaultDatabasePath(
+                OperatingSystem.IsWindows(),
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                Environment.GetEnvironmentVariable("XDG_DATA_HOME"),
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        }
+    }
+
+    internal static string GetDefaultDatabasePath(bool isWindows, string localAppData, string? xdgDataHome, string userProfile)
+    {
+        if (isWindows)
+        {
+            return Path.Combine(localAppData, "WattLedger", "wattledger.db");
+        }
+
+        var dataHome = !string.IsNullOrWhiteSpace(xdgDataHome) && Path.IsPathFullyQualified(xdgDataHome)
+            ? xdgDataHome
+            : Path.Combine(
+                Path.IsPathFullyQualified(userProfile) ? userProfile : Environment.CurrentDirectory,
+                ".local",
+                "share");
+        return Path.Combine(dataHome, "wattledger", "wattledger.db");
+    }
 
     public void Initialize()
     {
@@ -365,10 +381,11 @@ public sealed class LedgerDatabase
         command.CommandText = """
             SELECT date(start_ts / 1000, 'unixepoch', 'localtime') AS day,
                    SUM(CASE WHEN type = 'Battery' AND energy_wh > 0 THEN energy_wh ELSE 0 END) AS active_wh,
-                   SUM(CASE WHEN type = 'ModernStandby' AND energy_wh > 0 THEN energy_wh ELSE 0 END) AS standby_wh,
+                   SUM(CASE WHEN type IN ('ModernStandby', 'SleepGap') AND energy_wh > 0 THEN energy_wh ELSE 0 END) AS standby_wh,
                    SUM(CASE WHEN energy_wh < 0 THEN -energy_wh ELSE 0 END) AS charge_wh,
                    SUM(CASE WHEN type = 'Battery' THEN duration_seconds ELSE 0 END) AS active_seconds,
-                   SUM(CASE WHEN type = 'ModernStandby' THEN duration_seconds ELSE 0 END) AS standby_seconds
+                   SUM(CASE WHEN type IN ('ModernStandby', 'SleepGap') THEN duration_seconds ELSE 0 END) AS standby_seconds,
+                   SUM(CASE WHEN type IN ('ModernStandby', 'SleepGap') AND note LIKE '%battery energy unavailable%' THEN 1 ELSE 0 END) AS standby_energy_incomplete
             FROM sessions
             WHERE end_ts >= $from AND start_ts <= $to
             GROUP BY day
@@ -394,7 +411,8 @@ public sealed class LedgerDatabase
                 StandbyWh = reader.GetDouble(2),
                 ChargeWh = reader.GetDouble(3),
                 ActiveSeconds = reader.GetDouble(4),
-                StandbySeconds = reader.GetDouble(5)
+                StandbySeconds = reader.GetDouble(5),
+                StandbyEnergyIncomplete = reader.GetInt64(6) > 0
             });
         }
 
@@ -428,6 +446,12 @@ public sealed class LedgerDatabase
 
     private SqliteConnection Open()
     {
+        var directory = Path.GetDirectoryName(DatabasePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
         var connection = new SqliteConnection(_connectionString);
         connection.Open();
         return connection;

@@ -15,7 +15,12 @@ public sealed class SessionTracker
 
     public SessionRecord? Current => _current?.ToRecord();
 
-    public SessionTrackerResult Add(SampleRecord sample)
+    public SessionTrackerResult Add(SampleRecord sample) => Add(sample, "ModernStandby", false);
+
+    public SessionTrackerResult Add(
+        SampleRecord sample,
+        string gapSessionType,
+        bool gapConfirmedBySuspendEvents = false)
     {
         var completed = new List<SessionRecord>();
 
@@ -27,7 +32,10 @@ public sealed class SessionTracker
         }
 
         var gap = sample.Timestamp - _lastSample.Timestamp;
-        if (gap > GapThreshold)
+        var confirmedSleepGap = gapSessionType == "SleepGap" &&
+                                gapConfirmedBySuspendEvents &&
+                                gap > TimeSpan.Zero;
+        if (gap > GapThreshold || confirmedSleepGap)
         {
             var closed = _current.Close(_lastSample);
             if (closed.DurationSeconds > 0)
@@ -35,7 +43,7 @@ public sealed class SessionTracker
                 completed.Add(closed);
             }
 
-            var standby = CreateStandbySession(_lastSample, sample);
+            var standby = CreateStandbySession(_lastSample, sample, gapSessionType, gapConfirmedBySuspendEvents);
             if (standby.DurationSeconds > 0)
             {
                 completed.Add(standby);
@@ -94,7 +102,11 @@ public sealed class SessionTracker
         return "Battery";
     }
 
-    private static SessionRecord CreateStandbySession(SampleRecord previous, SampleRecord current)
+    private static SessionRecord CreateStandbySession(
+        SampleRecord previous,
+        SampleRecord current,
+        string type,
+        bool confirmedBySuspendEvents)
     {
         var energyWh = EnergyIntegrator.CapacityDeltaWh(
             previous.RemainingMwh,
@@ -106,8 +118,14 @@ public sealed class SessionTracker
         {
             Start = previous.Timestamp,
             End = current.Timestamp,
-            Type = "ModernStandby",
-            Note = current.IsAcOnline ? "AC" : "Battery",
+            Type = type,
+            Note = type == "ModernStandby"
+                ? current.IsAcOnline ? "AC" : "Battery"
+                : $"{(confirmedBySuspendEvents ? "Suspend/resume event confirmed" : "Inferred sleep gap")}; " +
+                  $"{(current.IsAcOnline ? "AC" : "battery")} state; " +
+                  (previous.RemainingMwh is not null && current.RemainingMwh is not null
+                      ? "energy estimated from capacity change"
+                      : "battery energy unavailable"),
             StartPercent = previous.BatteryPercent,
             EndPercent = current.BatteryPercent,
             StartRemainingMwh = previous.RemainingMwh,

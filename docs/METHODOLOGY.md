@@ -26,6 +26,8 @@ The relevant fields are:
 
 `GetSystemPowerStatus` supplies the AC line state and a percentage fallback.
 
+On Linux, battery entries are read from `/sys/class/power_supply`. Linux sysfs exports `energy_now`, `energy_full`, and `energy_full_design` in µWh; WattLedger divides by 1,000 to store mWh. `power_now` (µW) and `voltage_now` (µV) are converted to mW and mV. If only `current_now` (µA) and voltage are available, their product is converted to mW. Values that are absent, unreadable, unsupported, or invalid remain unavailable; they are not replaced with invented measurements. Some devices expose charge in µAh rather than energy, so energy capacity can remain unavailable even when a percentage is available.
+
 ### System power and RAPL
 
 The battery discharge rate is the ground truth for total system power. On machines that expose it, the Windows **Energy Meter** performance counter set provides CPU package energy counters (RAPL):
@@ -91,13 +93,14 @@ Each sample belongs to one of:
 | `AC` | plugged in, not charging (battery full or charge paused) |
 | `Charging` | plugged in and charging |
 | `Battery` | on battery, actively sampling |
-| `ModernStandby` | a gap in sampling longer than 60 seconds while the process was suspended or the machine slept |
+| `ModernStandby` | historical Windows classification for a sampling gap longer than 60 seconds |
+| `SleepGap` | Linux positive sampling gap confirmed by observed logind suspend/resume events, including gaps of 60 seconds or less; unconfirmed gaps require more than 60 seconds and are marked inferred |
 
 A session closes when the type changes or when the sampler detects a gap. The interval at a transition is assigned to the previous state, which is conservative for AC/battery switches.
 
 ### Standby accounting
 
-Modern Standby can suspend the app process. When sampling resumes, WattLedger sees a time gap. It creates a `ModernStandby` session spanning the gap and computes its energy from the remaining-capacity delta, not from a guessed idle wattage:
+On Windows, Modern Standby can suspend the app process. When sampling resumes, WattLedger sees a time gap and preserves the existing `ModernStandby` session type and threshold of more than 60 seconds. On Linux, an event-confirmed positive gap uses `SleepGap` even when it is 60 seconds or less. If both logind suspend and resume events are received, the session note records the event-confirmed pair; if the system bus is unavailable or an event is missed, only gaps longer than 60 seconds are classified as inferred `SleepGap` sessions. Timestamps alone do not prove the machine suspended. Gap energy is computed from remaining-capacity deltas, not guessed idle wattage:
 
 ```
 E_standby = (capacity_before - capacity_after) / 1000
@@ -105,12 +108,12 @@ E_standby = (capacity_before - capacity_after) / 1000
 
 This is why standby drain is reported separately and is not mixed into active-use averages. If the machine was fully off and the battery did not change, the session reports approximately zero.
 
-The current release only sees a standby gap if the sampler was running before and after it. If WattLedger is not running during the sleep, that session is not reconstructed.
+The sampler must have capacity readings before and after a gap to calculate a capacity delta. The current session schema stores gap energy as a numeric value: missing capacity is represented as `0 Wh`, the same value used for an unchanged capacity. Therefore `0 Wh` does not prove there was no drain; consult the nullable start/end capacity fields and the session note (`battery energy unavailable`). Report summaries flag standby energy as partial if one or more included standby sessions have missing capacity. A logind event pair confirms a suspend/resume transition but cannot recover battery measurements during the interval.
 
 ## 5. Reports
 
 - **Active Wh** — positive energy from `Battery` sessions.
-- **Standby Wh** — positive energy from `ModernStandby` sessions.
+- **Standby Wh** — positive energy from Windows `ModernStandby` and Linux `SleepGap` sessions. Linux session notes distinguish an observed logind suspend/resume pair from an inferred timestamp gap. If gap capacity is missing, the report marks standby energy as partial.
 - **Charged Wh** — absolute value of negative energy from `Charging` sessions.
 - **Average active watts** — active Wh / active hours.
 - **Average standby watts** — standby Wh / standby hours.
@@ -123,7 +126,7 @@ Timestamps are stored as UTC milliseconds. The UI and Markdown report convert to
 1. **Firmware rate is not a lab shunt.** Some laptops report rate in coarse steps, some report zero while charging, and some use a sign convention that differs from the Windows documentation. WattLedger uses the power-state flags and falls back to capacity deltas.
 2. **Capacity is quantized.** Many batteries update `RemainingCapacity` in 1% steps. Over a 5-second interval this can look like zero change; over minutes it is useful for calibration.
 3. **RAPL is package-only.** It does not include the display, storage, network, or VRM losses. Use it for breakdown and trends, not as the total.
-4. **Standby gaps are inferred.** A 60-second gap is treated as Modern Standby. A paused debugger or a heavily loaded machine could also create a gap; the report labels the session type honestly.
+4. **Sampling gaps can be ambiguous.** A gap over 60 seconds retains Windows `ModernStandby` for compatibility. Linux notes a confirmed suspend/resume only when both logind events are observed and accepts any positive gap, including 60 seconds or less; unconfirmed gaps require more than 60 seconds and remain inferred. A paused process or scheduling delay can also cause an inferred gap. If capacity is missing, the existing session schema stores 0 Wh, but the note and report mark energy as unavailable/partial.
 5. **Per-app attribution is not in v0.1.** Windows does not expose a precise public per-app energy API. v0.2 will estimate CPU/GPU shares and label them as estimates.
 
 ## 7. Validation

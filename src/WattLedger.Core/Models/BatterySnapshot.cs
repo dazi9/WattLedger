@@ -7,6 +7,7 @@ public sealed record BatterySnapshot
     public bool IsCharging { get; init; }
     public bool IsDischarging { get; init; }
     public int? Percent { get; init; }
+    public bool PercentIsEstimated { get; init; }
     public long? RemainingCapacityMwh { get; init; }
     public long? FullChargeCapacityMwh { get; init; }
     public long? DesignCapacityMwh { get; init; }

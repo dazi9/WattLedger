@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: 1
@@ -24,26 +24,128 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Restore
+      - name: Restore full Windows solution
         run: dotnet restore WattLedger.slnx
 
-      - name: Build
+      - name: Build full Windows solution
         run: dotnet build WattLedger.slnx -c Release --no-restore
 
-      - name: Test
+      - name: Test Core
         run: dotnet test tests/WattLedger.Core.Tests/WattLedger.Core.Tests.csproj -c Release --no-build
 
-      - name: Publish CLI (self-contained, single file)
+      - name: Publish Windows CLI (self-contained, single file)
         run: >
           dotnet publish src/WattLedger.Cli/WattLedger.Cli.csproj
           -c Release -r win-x64 --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
-          -o artifacts/cli
+          -o artifacts/cli-win-x64
 
-      - name: Upload CLI artifact
+      - name: Upload Windows CLI artifact
         uses: actions/upload-artifact@v4
         with:
           name: wattledger-cli-win-x64
-          path: artifacts/cli
+          path: artifacts/cli-win-x64
+          if-no-files-found: error
+
+      - name: Publish Windows desktop (self-contained, single file)
+        run: >
+          dotnet publish src/WattLedger.App/WattLedger.App.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o artifacts/desktop-win-x64
+
+      - name: Upload Windows desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wattledger-desktop-win-x64
+          path: artifacts/desktop-win-x64
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu-24.04
+            image: ubuntu:24.04
+          - distro: debian-12
+            image: debian:12
+          - distro: debian-13
+            image: debian:13
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+
+    steps:
+      - name: Install container prerequisites
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl dbus dbus-x11 fonts-dejavu-core git libfontconfig1 libfreetype6 libice6 libsm6 libx11-6 libx11-xcb1 libxcursor1 libxinerama1 libxrandr2 libxrender1 libxi6 libicu-dev libssl-dev python3 x11-utils xauth xvfb zlib1g
+          if ! DEBIAN_FRONTEND=noninteractive apt-get install -y libgtk-3-0; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y libgtk-3-0t64
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore Linux solution
+        run: dotnet restore WattLedger.Linux.slnx
+
+      - name: Build Linux solution
+        run: dotnet build WattLedger.Linux.slnx -c Release --no-restore
+
+      - name: Test Core
+        run: dotnet test tests/WattLedger.Core.Tests/WattLedger.Core.Tests.csproj -c Release --no-build
+
+      - name: Test Linux desktop
+        run: dotnet test tests/WattLedger.Linux.Tests/WattLedger.Linux.Tests.csproj -c Release --no-build
+
+      - name: Publish CLI (self-contained, single file)
+        run: >
+          dotnet publish src/WattLedger.Cli/WattLedger.Cli.csproj
+          -c Release -r linux-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o artifacts/cli-linux-x64
+
+      - name: Publish Linux desktop (self-contained, single file)
+        run: >
+          dotnet publish src/WattLedger.Linux/WattLedger.Linux.csproj
+          -c Release -r linux-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o artifacts/desktop-linux-x64
+
+      - name: Smoke-test Linux desktop startup under Xvfb
+        run: tools/smoke-linux.sh artifacts/desktop-linux-x64/WattLedger.Linux artifacts/cli-linux-x64/wattledger
+
+      - name: Build Debian package
+        if: matrix.distro == 'ubuntu-24.04'
+        run: tools/package-linux.sh artifacts/cli-linux-x64 artifacts/desktop-linux-x64 artifacts/wattledger-linux-x64.deb
+
+      - name: Upload Linux CLI and desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wattledger-linux-x64-${{ matrix.distro }}
+          path: |
+            artifacts/cli-linux-x64
+            artifacts/desktop-linux-x64
+          if-no-files-found: error
+
+      - name: Upload Debian package
+        if: matrix.distro == 'ubuntu-24.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wattledger-deb-linux-x64
+          path: artifacts/wattledger-linux-x64.deb
           if-no-files-found: error

@@ -38,11 +38,15 @@ internal static class Program
         try
         {
             using var service = new WattLedgerService(databasePath);
+            if (command == "status")
+            {
+                return RunStatus(service);
+            }
+
             service.Initialize();
 
             return command switch
             {
-                "status" => RunStatus(service),
                 "watch" => await RunWatchAsync(service),
                 "today" => RunReport(service, DateOnly.FromDateTime(DateTime.Now)),
                 "report" => RunReport(service, ParseDate(options.GetValueOrDefault("date"))),
@@ -61,7 +65,7 @@ internal static class Program
 
     private static int RunStatus(WattLedgerService service)
     {
-        var status = service.SampleOnce();
+        var status = service.ReadStatus();
         var battery = status.Battery;
 
         AnsiConsole.Write(new Rule("[bold]WattLedger[/]").LeftJustified());
@@ -71,10 +75,16 @@ internal static class Program
         var table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("Metric");
         table.AddColumn("Value");
-        table.AddRow("Battery", $"{FormatPercent(battery.Percent)}  ({FormatEnergy(battery.RemainingCapacityMwh)} / {FormatEnergy(battery.FullChargeCapacityMwh)})");
+        table.AddRow("Battery", $"{FormatPercent(battery.Percent)}{(battery.PercentIsEstimated ? " (estimated)" : "")}  ({FormatEnergy(battery.RemainingCapacityMwh)} / {FormatEnergy(battery.FullChargeCapacityMwh)})");
         table.AddRow("State", battery.IsAcOnline
             ? (battery.IsCharging ? "AC · charging" : "AC · idle")
-            : "Battery · discharging");
+            : battery.IsCharging
+                ? "Charging · AC state unknown"
+                : battery.IsDischarging
+                    ? "Battery · discharging"
+                    : battery.BatteryCount > 0 || battery.Percent is not null
+                        ? "Battery state unknown"
+                        : "Battery unavailable");
         var discharge = battery.DischargeWatts
                         ?? (battery.IsDischarging ? status.RecentAverageWatts : null);
         var charge = battery.ChargeWatts
@@ -99,7 +109,7 @@ internal static class Program
         table.AddRow("RAPL GPU", status.Rapl.GpuWatts is { } g ? $"{g:0.00} W" : "—");
         table.AddRow("RAPL DRAM", status.Rapl.DramWatts is { } d ? $"{d:0.00} W" : "—");
         table.AddRow("Recent average", status.RecentAverageWatts is { } avg ? $"{avg:0.0} W" : "—");
-        table.AddRow("Estimated left", status.EstimatedRemainingHours is { } hours ? $"{hours:0.0} h" : "—");
+        table.AddRow("Estimated left (instant rate)", status.EstimatedRemainingHours is { } hours ? $"{hours:0.0} h" : "—");
         AnsiConsole.Write(table);
 
         return 0;
@@ -221,7 +231,7 @@ internal static class Program
         AnsiConsole.MarkupLine("[bold]Battery devices[/]");
         if (diagnostics.BatteryDevices.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]No battery devices reported by the Windows battery interface.[/]");
+            AnsiConsole.MarkupLine("[yellow]No battery devices reported by the platform.[/]");
         }
         else
         {
@@ -291,10 +301,10 @@ internal static class Program
         var summary = new Table().Border(TableBorder.Rounded);
         summary.AddColumn("Metric");
         summary.AddColumn("Value");
-        summary.AddRow("Battery energy used", $"{report.DischargeWh:0.00} Wh");
+        summary.AddRow(report.StandbyEnergyIncomplete ? "Battery energy used (partial)" : "Battery energy used", $"{report.DischargeWh:0.00} Wh");
         summary.AddRow("Battery energy charged", $"{report.ChargeWh:0.00} Wh");
         summary.AddRow("Active on battery", $"{ReportBuilder.FormatDuration(report.ActiveSeconds)}  (avg {report.AverageActiveWatts:0.0} W)");
-        summary.AddRow("Modern Standby", $"{ReportBuilder.FormatDuration(report.StandbySeconds)}  (avg {report.AverageStandbyWatts:0.0} W)");
+        summary.AddRow("Sleep / standby", $"{ReportBuilder.FormatDuration(report.StandbySeconds)}  (avg {(report.StandbyEnergyIncomplete ? "incomplete" : $"{report.AverageStandbyWatts:0.0} W")})");
         summary.AddRow("AC / charging", ReportBuilder.FormatDuration(report.AcSeconds));
         if (report.Health?.HealthPercent is { } health)
         {
@@ -318,6 +328,7 @@ internal static class Program
         table.AddColumn("Battery");
         table.AddColumn("Energy");
         table.AddColumn("Avg W");
+        table.AddColumn("Note");
 
         foreach (var session in report.Sessions)
         {
@@ -328,11 +339,12 @@ internal static class Program
                 ReportBuilder.FormatDuration(session.DurationSeconds),
                 $"{FormatPercent(session.StartPercent)} → {FormatPercent(session.EndPercent)}",
                 $"{session.EnergyWh:0.00} Wh",
-                $"{session.AverageWatts:0.0} W");
+                $"{session.AverageWatts:0.0} W",
+                Markup.Escape(session.Note ?? ""));
         }
 
         AnsiConsole.Write(table);
-        AnsiConsole.MarkupLine("[grey]Energy is integrated from battery discharge power; standby is measured from capacity delta.[/]");
+        AnsiConsole.MarkupLine("[grey]Sleep-gap energy is inferred from capacity changes where available; missing battery energy is marked unavailable.[/]");
     }
 
     private static Dictionary<string, string> ParseOptions(string[] args, int start)
@@ -393,7 +405,7 @@ internal static class Program
     private static void PrintHelp()
     {
         AnsiConsole.Write(new Rule("[bold]WattLedger[/]").LeftJustified());
-        AnsiConsole.MarkupLine("A local-first energy journal for Windows laptops.");
+        AnsiConsole.MarkupLine("A local-first energy journal for laptops.");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[bold]Usage[/]");
         AnsiConsole.WriteLine("  wattledger status                 One-shot live status (default)");
