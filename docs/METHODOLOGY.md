@@ -98,6 +98,10 @@ Each sample belongs to one of:
 
 A session closes when the type changes or when the sampler detects a gap. The interval at a transition is assigned to the previous state, which is conservative for AC/battery switches.
 
+On Linux, `status=Charging` is evidence of external power and takes precedence over an AC/USB supply reporting `online=0` or no readable `online` value. Both the device online flag and aggregate AC state reflect this, so charging samples form `Charging` sessions and count toward AC time.
+
+Linux session tracking deliberately requires a present system battery and evidence of charging, discharging, or external power. If firmware reports `Full`, `Not charging`, or `Unknown` without a readable online supply indicating external power, the power source is ambiguous. WattLedger stores an `Unknown` sample, closes the current session at the last known sample, and clears session continuity. When the state becomes known again, a new session starts; no active, AC, or sleep energy is inferred across the unknown interval. The raw battery percentage and available capacities are still recorded. `Full` or `Unknown` with `online=1` continues an `AC` session. This conservative policy can leave gaps in session history on firmware that omits both power-source signals.
+
 ### Standby accounting
 
 On Windows, Modern Standby can suspend the app process. When sampling resumes, WattLedger sees a time gap and preserves the existing `ModernStandby` session type and threshold of more than 60 seconds. On Linux, an event-confirmed positive gap uses `SleepGap` even when it is 60 seconds or less. If both logind suspend and resume events are received, the session note records the event-confirmed pair; if the system bus is unavailable or an event is missed, only gaps longer than 60 seconds are classified as inferred `SleepGap` sessions. Timestamps alone do not prove the machine suspended. Gap energy is computed from remaining-capacity deltas, not guessed idle wattage:
@@ -120,6 +124,16 @@ The sampler must have capacity readings before and after a gap to calculate a ca
 - **Battery health** — `FullChargedCapacity / DesignedCapacity`, if both are known.
 
 Timestamps are stored as UTC milliseconds. The UI and Markdown report convert to local time; CSV exports both `timestamp_local` and `timestamp_utc`.
+
+### Interactive chart range estimates
+
+The Linux chart supports dragging between recorded points or entering two local times to select a range. Calculations use the original timestamped power readings, independent of the reduced points drawn at the current zoom level. Readings with duplicate timestamps use the last value while preserving any sleep-gap boundary.
+
+For each continuous pair of readings, power at the selected boundaries is linearly interpolated and energy is integrated by the trapezoidal rule. Positive power contributes to discharged Wh; negative power contributes to charged Wh. A segment that crosses zero is split at that crossing so charging and discharging are calculated separately. Net Wh is discharged Wh minus charged Wh.
+
+Intervals with missing or non-finite power at either endpoint, gaps longer than 60 seconds, and recorded sleep-gap boundaries (including event-confirmed gaps of 60 seconds or less) are excluded. The chart does not extrapolate outside recorded data. **Coverage** is the included duration divided by the selected duration; **average watts** is net Wh divided by the included hours. With no included interval, average watts is unavailable; zero accumulated Wh does not establish that no energy was used.
+
+These are power-rate estimates. They do not apply the ledger's capacity-delta fallback or standby accounting, so selected-range energy can differ from ledger totals for the same times.
 
 ## 6. Known error sources
 

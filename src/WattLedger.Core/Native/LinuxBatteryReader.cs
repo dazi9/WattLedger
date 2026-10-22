@@ -79,7 +79,7 @@ public sealed class LinuxBatteryReader
                     RateMw = ToInt(rateMw),
                     PowerState = (charging ? NativeMethods.BatteryCharging : 0u) |
                                  (discharging ? NativeMethods.BatteryDischarging : 0u) |
-                                 (online == true || (online is null && charging) ? NativeMethods.BatteryPowerOnLine : 0u),
+                                 (online == true || charging ? NativeMethods.BatteryPowerOnLine : 0u),
                     CycleCount = ToInt(ReadLong(path, "cycle_count")),
                     DeviceName = name,
                     Manufacturer = ReadText(path, "manufacturer"),
@@ -137,7 +137,9 @@ public sealed class LinuxBatteryReader
         return new BatterySnapshot
         {
             Timestamp = DateTimeOffset.Now,
-            IsAcOnline = online ?? data.Any(d => d.Charging),
+            // Charging is positive evidence of external power even when another
+            // supply (for example an unused AC/USB input) reports online=0.
+            IsAcOnline = online == true || data.Any(d => d.Charging),
             IsCharging = data.Any(d => d.Charging),
             IsDischarging = data.Any(d => d.Discharging),
             Percent = percent,
@@ -163,9 +165,10 @@ public sealed class LinuxBatteryReader
         {
             foreach (var path in Directory.EnumerateDirectories(root))
             {
-                if (!string.Equals(ReadText(path, "type"), "Mains", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(ReadText(path, "type"), "USB", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(ReadText(path, "type"), "USB_C", StringComparison.OrdinalIgnoreCase))
+                var type = ReadText(path, "type");
+                if (!string.Equals(type, "Mains", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(type, "USB", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(type, "USB_C", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }

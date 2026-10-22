@@ -31,6 +31,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private Brush _powerBrush = GreenBrush;
     private Brush _stateBrush = BlueBrush;
     private IReadOnlyList<ChartSample> _chartSamples = Array.Empty<ChartSample>();
+    private string? _startupError;
 
     public MainViewModel(WattLedgerService service)
     {
@@ -134,15 +135,24 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void RefreshLive()
     {
+        if (_startupError is not null) return;
         try
         {
-            var status = _service.Latest ?? _service.SampleOnce();
-            ApplyStatus(status);
+            if (_service.Latest is { } status) ApplyStatus(status);
         }
         catch (Exception ex)
         {
             StatusText = $"Sampling error: {ex.Message}";
         }
+    }
+
+    public void SetStartupFailure(string message)
+    {
+        _startupError = message;
+        StateText = "NOT RECORDING";
+        StateBrush = RedBrush;
+        PowerDetailText = "Sampler could not start";
+        StatusText = $"Not recording: {message}";
     }
 
     public void RefreshReport()
@@ -178,7 +188,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
                     s.BatteryPercent))
                 .ToArray();
 
-            StatusText = $"Recording locally · last sample {DateTime.Now:HH:mm:ss}";
+            if (_startupError is null)
+            {
+                StatusText = _service.Latest is { } latest
+                    ? $"Recording locally · last sample {latest.Timestamp.ToLocalTime():HH:mm:ss}"
+                    : "Waiting for the first sample…";
+            }
             ChartUpdated?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex)

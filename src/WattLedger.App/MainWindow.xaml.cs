@@ -83,7 +83,9 @@ public partial class MainWindow : Window
 
     public void HideToTray() => Hide();
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    public void SetStartupFailure(string message) => _viewModel.SetStartupFailure(message);
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
     {
         if (_loaded)
         {
@@ -91,15 +93,7 @@ public partial class MainWindow : Window
         }
 
         _loaded = true;
-        try
-        {
-            await _service.StartAsync();
-            _viewModel.RefreshAll();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "WattLedger could not start", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+        _viewModel.RefreshAll();
 
         _liveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _liveTimer.Tick += (_, _) => _viewModel.RefreshLive();

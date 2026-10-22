@@ -83,7 +83,18 @@ dotnet publish src/WattLedger.Linux -c Release -r linux-x64 --self-contained tru
 tools/package-linux.sh artifacts/cli-linux-x64 artifacts/desktop-linux-x64 artifacts/wattledger.deb
 ```
 
-`wattledger status` is a sensor-only read: it does not create the database, record a sample, or take the sampler's writer lease, and remains usable while the desktop or `watch` records. Desktop `--db` paths are made absolute at launch so enabling start-at-login keeps the same database. The Linux chart spans the actual recorded timestamps (with a minimum range for short runs), with green signed power and a blue dashed battery-percentage curve; negative chart power indicates charging. Report/chart refresh is deferred while hidden to the tray and catches up when shown.
+`wattledger status` is a sensor-only read: it does not create the database, record a sample, or take the sampler's writer lease, and remains usable while the desktop or `watch` records. Desktop `--db` paths are made absolute at launch so enabling start-at-login keeps the same database. If another sampler owns the database, the Windows app reports the startup failure even in `--tray` mode and displays **NOT RECORDING**.
+
+The Linux chart spans actual recorded timestamps, with green signed power and a blue dashed battery-percentage curve. Positive power means discharge; negative power means charging, including in the live card and tray tooltip.
+
+- **Zoom:** scroll over the plot, use Zoom +/−, or double-click / Fit today to reset. The power axis scales to the visible range; the battery axis stays at 0–100%.
+- **Pan:** Shift-drag or middle-button drag. With chart focus, use arrow keys to pan, +/− to zoom, Home to reset, and Escape to clear a selection.
+- **Calculate a range:** drag between recorded points, or enter local From / To times (`HH:mm:ss`) and click Calculate. Fit selection zooms to that range. Statistics include discharge/charge Wh, signed net Wh, time-weighted average W, and valid-data coverage.
+- **Inspect:** hover for the original sample's timestamp, watts, and battery percentage. Display reduction preserves peaks; range calculations use the original samples, not the reduced curve.
+
+Range statistics are power-rate estimates, separate from the capacity-calibrated ledger totals. Missing rates, intervals longer than 60 seconds, and recorded sleep gaps (including confirmed short suspends) are excluded from integration; average power uses only covered seconds. An interval with no usable power is shown as unavailable. Reports and exports run in the background. Chart history loads incrementally, and report/chart refresh is deferred while hidden or minimized and catches up when restored.
+
+Minor interaction limitations and deferred work are recorded in [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md).
 
 Linux battery values are read from kernel sysfs and converted from its micro-units to WattLedger's internal mWh, mW, and mV units. Missing sysfs values remain unavailable. A missing or zero `power_now` falls back to usable `current_now` and voltage. When a battery reports no usable rate, WattLedger estimates energy from capacity changes; quantization and firmware update cadence can make short intervals appear as zero. Linux currently does not provide RAPL, brightness, or foreground-process readings. A `SleepGap` is timestamp-detected; when logind suspend and resume events are both observed, its note records that confirmation, otherwise it remains explicitly inferred. Missing capacity is marked as unavailable and report summaries flag standby energy as partial. Basic live readings and UI startup were checked on one Ubuntu machine; real suspend/resume and controlled battery-rundown validation remain unperformed. See [the Linux design and validation record](docs/linux-port.md).
 

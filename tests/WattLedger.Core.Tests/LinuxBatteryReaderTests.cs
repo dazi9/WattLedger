@@ -70,6 +70,43 @@ public sealed class LinuxBatteryReaderTests
         Assert.False(device.IsDischarging);
         Assert.Equal(2_250, snapshot.ChargeMw);
         Assert.True(snapshot.IsAcOnline);
+        Assert.True(device.IsOnLine);
+    }
+
+    [Theory]
+    [InlineData("Mains")]
+    [InlineData("USB")]
+    [InlineData("USB_C")]
+    public void ChargingOverridesOfflineSupplyAndIsAccountedAsAc(string supplyType)
+    {
+        using var fixture = new SysfsFixture();
+        fixture.Supply("AC0", supplyType, "0");
+        fixture.Battery("BAT0", ("power_now", "12000000"), ("status", "Charging"));
+        var reader = new LinuxBatteryReader(fixture.Root);
+        var snapshot = reader.Read();
+        var device = Assert.Single(reader.ReadDevices());
+
+        Assert.True(snapshot.IsAcOnline);
+        Assert.True(snapshot.IsCharging);
+        Assert.True(device.IsOnLine);
+        Assert.True(device.IsCharging);
+
+        var start = new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero);
+        var provider = new FakeSensorProvider(PlatformSensorFactory.LinuxShouldTrackSessions,
+            snapshot with { Timestamp = start },
+            snapshot with { Timestamp = start.AddSeconds(30) });
+        using var service = new WattLedgerService(fixture.DatabasePath, provider);
+        service.SampleOnce();
+        service.SampleOnce();
+
+        var samples = service.GetSamples(start, start.AddMinutes(1));
+        Assert.Equal(2, samples.Count);
+        Assert.All(samples, sample => Assert.Equal("Charging", sample.PowerState));
+        var report = service.GetReport(DateOnly.FromDateTime(start.LocalDateTime));
+        Assert.Equal("Charging", Assert.Single(report.Sessions).Type);
+        Assert.Equal(30, report.AcSeconds);
+        Assert.Equal(0, report.ActiveSeconds);
+        Assert.Equal(0.1, report.ChargeWh, precision: 6);
     }
 
     [Fact]
@@ -91,11 +128,14 @@ public sealed class LinuxBatteryReaderTests
         Assert.Null(Assert.Single(overflow, d => d.DevicePath.EndsWith("BAT1", StringComparison.Ordinal)).RateMw);
     }
 
-    [Fact]
-    public void UnknownBatteryStatusIsNotTreatedAsDischarging()
+    [Theory]
+    [InlineData("Unknown")]
+    [InlineData("Full")]
+    [InlineData("Not charging")]
+    public void AmbiguousBatteryStatusWithoutExternalPowerBreaksSessionContinuity(string status)
     {
         using var fixture = new SysfsFixture();
-        fixture.Battery("BAT0", ("energy_now", "4000000"), ("energy_full", "8000000"), ("status", "Unknown"));
+        fixture.Battery("BAT0", ("energy_now", "4000000"), ("energy_full", "8000000"), ("status", status));
 
         var snapshot = new LinuxBatteryReader(fixture.Root).Read();
 
@@ -103,6 +143,44 @@ public sealed class LinuxBatteryReaderTests
         Assert.False(snapshot.IsAcOnline);
         Assert.False(snapshot.IsDischarging);
         Assert.False(PlatformSensorFactory.LinuxShouldTrackSessions(snapshot));
+
+        var start = new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero);
+        var known = snapshot with { IsDischarging = true, DischargeMw = 12_000 };
+        var provider = new FakeSensorProvider(PlatformSensorFactory.LinuxShouldTrackSessions,
+            known with { Timestamp = start },
+            known with { Timestamp = start.AddSeconds(5) },
+            snapshot with { Timestamp = start.AddSeconds(10) },
+            known with { Timestamp = start.AddMinutes(2) },
+            known with { Timestamp = start.AddMinutes(2).AddSeconds(5) });
+        using var service = new WattLedgerService(fixture.DatabasePath, provider);
+        for (var index = 0; index < 5; index++) service.SampleOnce();
+
+        var samples = service.GetSamples(start, start.AddMinutes(3));
+        Assert.Equal("Unknown", samples[2].PowerState);
+        Assert.Equal(50, samples[2].BatteryPercent);
+        var report = service.GetReport(DateOnly.FromDateTime(start.LocalDateTime));
+        Assert.Equal(2, report.Sessions.Count);
+        Assert.All(report.Sessions, session => Assert.Equal("Battery", session.Type));
+        Assert.Equal(10, report.ActiveSeconds);
+        Assert.Equal(0, report.StandbySeconds);
+    }
+
+    [Theory]
+    [InlineData("Unknown")]
+    [InlineData("Full")]
+    [InlineData("Not charging")]
+    public void AmbiguousBatteryStatusWithExternalPowerAllowsAcSession(string status)
+    {
+        using var fixture = new SysfsFixture();
+        fixture.Supply("AC0", "Mains", "1");
+        fixture.Battery("BAT0", ("status", status));
+
+        var snapshot = new LinuxBatteryReader(fixture.Root).Read();
+
+        Assert.True(snapshot.IsAcOnline);
+        Assert.False(snapshot.IsCharging);
+        Assert.False(snapshot.IsDischarging);
+        Assert.True(PlatformSensorFactory.LinuxShouldTrackSessions(snapshot));
     }
 
     [Fact]
@@ -552,6 +630,14 @@ public sealed class LinuxBatteryReaderTests
 
         public void RemoveProperty(string battery, string property) =>
             File.Delete(Path.Combine(Root, battery, property));
+
+        public void Supply(string name, string type, string online)
+        {
+            var path = Path.Combine(Root, name);
+            Directory.CreateDirectory(path);
+            Write(path, "type", type);
+            Write(path, "online", online);
+        }
 
         private static void Write(string path, string property, string value) =>
             File.WriteAllText(Path.Combine(path, property), value);
