@@ -179,7 +179,7 @@ public static class ReportBuilder
     {
         "Battery" => "Battery · 清醒",
         "ModernStandby" => "Modern Standby · 待机",
-        "SleepGap" => "Inferred sleep gap",
+        "SleepGap" => "Sleep gap",
         "AC" => "AC · 插电",
         "Charging" => "Charging · 充电",
         _ => type

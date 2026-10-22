@@ -50,7 +50,7 @@ public sealed class LinuxBatteryReader
                 var currentUa = ReadSignedLong(path, "current_now");
                 var rateUw = Magnitude(ReadSignedLong(path, "power_now"));
                 var rateMw = Scale(rateUw, 1_000);
-                if (rateMw is null && voltageUv is > 0)
+                if (rateUw is not > 0 && voltageUv is > 0)
                 {
                     var magnitudeUa = Magnitude(currentUa);
                     if (magnitudeUa is not null)

@@ -11,12 +11,6 @@ public sealed class LedgerDatabase
     public LedgerDatabase(string? databasePath = null)
     {
         DatabasePath = databasePath ?? DefaultDatabasePath;
-        var directory = Path.GetDirectoryName(DatabasePath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = DatabasePath,
@@ -452,6 +446,12 @@ public sealed class LedgerDatabase
 
     private SqliteConnection Open()
     {
+        var directory = Path.GetDirectoryName(DatabasePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
         var connection = new SqliteConnection(_connectionString);
         connection.Open();
         return connection;

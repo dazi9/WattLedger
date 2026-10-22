@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
 using WattLedger.Core.Native;
+using WattLedger.Core.Reporting;
 using WattLedger.Core.Storage;
 
 namespace WattLedger.Core.Tests;
@@ -41,6 +42,18 @@ public sealed class LinuxBatteryReaderTests
         Assert.Equal(18_000, snapshot.DischargeMw);
         Assert.Null(snapshot.RemainingCapacityMwh);
         Assert.Null(snapshot.FullChargeCapacityMwh);
+    }
+
+    [Fact]
+    public void UsesCurrentTimesVoltageWhenPowerNowIsZero()
+    {
+        using var fixture = new SysfsFixture();
+        fixture.Battery("BAT0", ("power_now", "0"), ("current_now", "1500000"),
+            ("voltage_now", "12000000"), ("status", "Discharging"));
+
+        var snapshot = new LinuxBatteryReader(fixture.Root).Read();
+
+        Assert.Equal(18_000, snapshot.DischargeMw);
     }
 
     [Fact]
@@ -299,6 +312,16 @@ public sealed class LinuxBatteryReaderTests
         var gap = Assert.Single(service.GetSessions(start.AddDays(-1), start.AddDays(1)));
         Assert.Equal("SleepGap", gap.Type);
         Assert.Contains("Suspend/resume event confirmed", gap.Note);
+        Assert.Equal("Sleep gap", ReportBuilder.StateLabel(gap.Type));
+
+        var markdownPath = Path.Combine(fixture.Root, "report.md");
+        ReportBuilder.ExportMarkdown(
+            service.GetReport(DateOnly.FromDateTime(start.LocalDateTime)),
+            markdownPath);
+        var markdown = File.ReadAllText(markdownPath);
+        Assert.Contains("| Sleep gap |", markdown);
+        Assert.Contains("Suspend/resume event confirmed", markdown);
+        Assert.DoesNotContain("Inferred sleep gap", markdown);
     }
 
     [Fact]
@@ -351,6 +374,74 @@ public sealed class LinuxBatteryReaderTests
     }
 
     [Fact]
+    public void ReadStatusDoesNotAcquireWriterLeaseOrWriteSamplesWhileSamplerIsActive()
+    {
+        using var fixture = new SysfsFixture();
+        var firstProvider = new FakeSensorProvider(TrackBattery, Battery(DateTimeOffset.UtcNow, count: 1, percent: 50));
+        var statusProvider = new FakeSensorProvider(TrackBattery, Battery(DateTimeOffset.UtcNow, count: 1, percent: 49));
+        using var sampler = new WattLedgerService(fixture.DatabasePath, firstProvider);
+        using var statusService = new WattLedgerService(fixture.DatabasePath, statusProvider);
+        sampler.SampleOnce();
+
+        var status = statusService.ReadStatus();
+
+        Assert.Equal(49, status.Battery.Percent);
+        Assert.Equal(1, statusProvider.ReadCount);
+        Assert.Single(sampler.GetSamples(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1)));
+        Assert.Throws<InvalidOperationException>(() => statusService.SampleOnce());
+        Assert.Single(sampler.GetSamples(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1)));
+    }
+
+    [Fact]
+    public async Task ReadStatusDoesNotWriteLedgerWhileBackgroundSamplerIsRunning()
+    {
+        using var fixture = new SysfsFixture();
+        var battery = Battery(DateTimeOffset.UtcNow, count: 1, percent: 50) with
+        {
+            DesignCapacityMwh = 10_000,
+            FullChargeCapacityMwh = 9_000,
+            RemainingCapacityMwh = 4_500
+        };
+        var provider = new FakeSensorProvider(TrackBattery, battery);
+        using var service = new WattLedgerService(fixture.DatabasePath, provider);
+        var firstSampleRecorded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.SampleRecorded += (_, _) => firstSampleRecorded.TrySetResult();
+
+        await service.StartAsync();
+        await firstSampleRecorded.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        service.NotifySuspend();
+        service.Database.UpsertSession(new SessionRecord
+        {
+            Start = battery.Timestamp.AddMinutes(-2),
+            End = battery.Timestamp.AddMinutes(-1),
+            Type = "Battery",
+            EnergyWh = 1,
+            AverageWatts = 60,
+            PeakWatts = 60
+        });
+        var before = ReadRecordCounts(fixture.DatabasePath);
+
+        var status = service.ReadStatus();
+
+        Assert.Equal(50, status.Battery.Percent);
+        Assert.Equal(before, ReadRecordCounts(fixture.DatabasePath));
+        Assert.Equal(2, provider.ReadCount);
+    }
+
+    [Fact]
+    public void ReadStatusDoesNotCreateDatabaseDirectory()
+    {
+        using var fixture = new SysfsFixture();
+        var databaseDirectory = Path.Combine(fixture.Root, "status-only");
+        var provider = new FakeSensorProvider(TrackBattery, Battery(DateTimeOffset.UtcNow, count: 1, percent: 50));
+        using var service = new WattLedgerService(Path.Combine(databaseDirectory, "ledger.db"), provider);
+
+        service.ReadStatus();
+
+        Assert.False(Directory.Exists(databaseDirectory));
+    }
+
+    [Fact]
     public async Task StopCancelsLoopAndResumeAfterStopDoesNotReadSensors()
     {
         using var fixture = new SysfsFixture();
@@ -383,6 +474,21 @@ public sealed class LinuxBatteryReaderTests
     private static bool TrackBattery(BatterySnapshot battery) =>
         battery.BatteryCount > 0 && (battery.IsCharging || battery.IsDischarging || battery.IsAcOnline);
     private static bool TrackFallback(BatterySnapshot battery) => battery.BatteryCount > 0 || battery.Percent is not null || battery.IsAcOnline;
+
+    private static (long Samples, long Sessions, long Health) ReadRecordCounts(string databasePath)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly
+        }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT (SELECT COUNT(*) FROM samples), (SELECT COUNT(*) FROM sessions), (SELECT COUNT(*) FROM battery_health)";
+        using var reader = command.ExecuteReader();
+        Assert.True(reader.Read());
+        return (reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2));
+    }
 
     private static BatterySnapshot Battery(
         DateTimeOffset timestamp,

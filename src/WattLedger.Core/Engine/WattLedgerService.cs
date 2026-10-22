@@ -58,6 +58,34 @@ public sealed class WattLedgerService : IDisposable
     public IReadOnlyDictionary<string, double> ReadRawEnergyMilliwatts() => _sensors.ReadRawEnergyMilliwatts();
     public int? ReadBrightnessForDiagnostics() => _sensors.ReadBrightness(force: true);
 
+    /// <summary>Reads the current sensor state without initializing or writing the ledger.</summary>
+    public LedgerStatus ReadStatus()
+    {
+        lock (_sampleGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            var battery = _sensors.ReadBattery();
+            var rapl = _sensors.ReadRapl();
+            var brightness = _sensors.ReadBrightness();
+            var foreground = _sensors.ReadForegroundProcess();
+            var instantaneousDischargeWatts = battery.IsDischarging ? battery.DischargeWatts : null;
+            var remainingHours = battery.RemainingCapacityMwh is > 0 && instantaneousDischargeWatts is > 0.1
+                ? (double?)(battery.RemainingCapacityMwh.Value / 1000.0 / instantaneousDischargeWatts.Value)
+                : null;
+
+            return new LedgerStatus
+            {
+                Battery = battery,
+                Rapl = rapl,
+                BrightnessPercent = brightness,
+                ForegroundProcess = foreground,
+                EstimatedRemainingHours = remainingHours,
+                Timestamp = battery.Timestamp
+            };
+        }
+    }
+
     public void Initialize()
     {
         lock (_sampleGate)

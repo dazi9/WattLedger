@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-if [[ $# -ne 1 ]]; then
-  printf 'Usage: %s <published-desktop-executable>\n' "${0##*/}" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  printf 'Usage: %s <published-desktop-executable> [published-cli-executable]\n' "${0##*/}" >&2
   exit 2
 fi
 
@@ -10,6 +10,14 @@ desktop_binary="$(cd -- "$(dirname -- "$1")" && pwd -P)/$(basename -- "$1")"
 if [[ ! -x "$desktop_binary" ]]; then
   printf 'Published desktop executable not found: %s\n' "$desktop_binary" >&2
   exit 1
+fi
+cli_binary=
+if [[ $# -eq 2 ]]; then
+  if [[ ! -x "$2" ]]; then
+    printf 'Published CLI executable not found: %s\n' "$2" >&2
+    exit 1
+  fi
+  cli_binary="$(cd -- "$(dirname -- "$2")" && pwd -P)/$(basename -- "$2")"
 fi
 
 for command_name in dbus-run-session python3 timeout xvfb-run xwininfo; do
@@ -57,11 +65,24 @@ timeout --signal=TERM --kill-after=2s 15s \
           printf "Desktop process exited before showing its window.\n" >&2
           exit 1
         fi
-        if xwininfo -root -tree 2>/dev/null | grep -F "\"WattLedger\"" >/dev/null; then
+        if xwininfo -name WattLedger 2>/dev/null | grep -F "Map State: IsViewable" >/dev/null; then
           for _ in {1..30}; do
             sample_count="$(python3 -c "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute(\"SELECT count(*) FROM samples\").fetchone()[0])" "$2" 2>/dev/null || true)"
             if [[ "$sample_count" =~ ^[0-9]+$ ]] && (( sample_count > 0 )); then
               printf "Desktop window appeared and wrote %s sample(s) to its isolated database.\n" "$sample_count"
+              if [[ -n "$3" ]]; then
+                if timeout --signal=TERM --kill-after=1s 5s "$3" status --db "$2"; then
+                  printf "CLI status exited successfully against the active desktop database.\n"
+                else
+                  cli_status=$?
+                  if [[ $cli_status -eq 124 || $cli_status -eq 137 ]]; then
+                    printf "CLI status timed out after 5 seconds (status %s).\n" "$cli_status" >&2
+                  else
+                    printf "CLI status failed against the active desktop database (status %s).\n" "$cli_status" >&2
+                  fi
+                  exit 1
+                fi
+              fi
               if timeout --signal=TERM --kill-after=1s 5s "$1" --db "$2"; then
                 :
               else
@@ -73,7 +94,7 @@ timeout --signal=TERM --kill-after=2s 15s \
                 printf "First desktop process exited after the second launch.\n" >&2
                 exit 1
               fi
-              if ! xwininfo -root -tree 2>/dev/null | grep -F "\"WattLedger\"" >/dev/null; then
+              if ! xwininfo -name WattLedger 2>/dev/null | grep -F "Map State: IsViewable" >/dev/null; then
                 printf "First desktop window disappeared after the second launch.\n" >&2
                 exit 1
               fi
@@ -90,7 +111,7 @@ timeout --signal=TERM --kill-after=2s 15s \
 
       printf "Desktop process stayed alive but did not create a WattLedger window.\n" >&2
       exit 1
-    ' _ "$desktop_binary" "$smoke_dir/data/wattledger.db"
+    ' _ "$desktop_binary" "$smoke_dir/data/wattledger.db" "$cli_binary"
 status=$?
 set -e
 

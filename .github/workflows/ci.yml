@@ -127,7 +127,7 @@ jobs:
           -o artifacts/desktop-linux-x64
 
       - name: Smoke-test Linux desktop startup under Xvfb
-        run: tools/smoke-linux.sh artifacts/desktop-linux-x64/WattLedger.Linux
+        run: tools/smoke-linux.sh artifacts/desktop-linux-x64/WattLedger.Linux artifacts/cli-linux-x64/wattledger
 
       - name: Build Debian package
         if: matrix.distro == 'ubuntu-24.04'

@@ -38,11 +38,15 @@ internal static class Program
         try
         {
             using var service = new WattLedgerService(databasePath);
+            if (command == "status")
+            {
+                return RunStatus(service);
+            }
+
             service.Initialize();
 
             return command switch
             {
-                "status" => RunStatus(service),
                 "watch" => await RunWatchAsync(service),
                 "today" => RunReport(service, DateOnly.FromDateTime(DateTime.Now)),
                 "report" => RunReport(service, ParseDate(options.GetValueOrDefault("date"))),
@@ -61,7 +65,7 @@ internal static class Program
 
     private static int RunStatus(WattLedgerService service)
     {
-        var status = service.SampleOnce();
+        var status = service.ReadStatus();
         var battery = status.Battery;
 
         AnsiConsole.Write(new Rule("[bold]WattLedger[/]").LeftJustified());
@@ -105,7 +109,7 @@ internal static class Program
         table.AddRow("RAPL GPU", status.Rapl.GpuWatts is { } g ? $"{g:0.00} W" : "—");
         table.AddRow("RAPL DRAM", status.Rapl.DramWatts is { } d ? $"{d:0.00} W" : "—");
         table.AddRow("Recent average", status.RecentAverageWatts is { } avg ? $"{avg:0.0} W" : "—");
-        table.AddRow("Estimated left", status.EstimatedRemainingHours is { } hours ? $"{hours:0.0} h" : "—");
+        table.AddRow("Estimated left (instant rate)", status.EstimatedRemainingHours is { } hours ? $"{hours:0.0} h" : "—");
         AnsiConsole.Write(table);
 
         return 0;
