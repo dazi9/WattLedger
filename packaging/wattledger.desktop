@@ -7,3 +7,4 @@ Icon=wattledger
 Terminal=false
 Categories=System;Monitor;
 StartupNotify=true
+StartupWMClass=wattledger

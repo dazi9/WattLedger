@@ -2,7 +2,9 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using System.Diagnostics;
+using WattLedger.Core.Engine;
 using WattLedger.Linux;
 
 namespace WattLedger.Linux.Tests;
@@ -37,7 +39,55 @@ public sealed class LinuxDesktopTests
         var options = AppOptions.Parse(["--tray", "--db", "/tmp/a database.sqlite"]);
 
         Assert.True(options.StartInTray);
-        Assert.Equal("/tmp/a database.sqlite", options.DatabasePath);
+        Assert.Equal(Path.GetFullPath("/tmp/a database.sqlite"), options.DatabasePath);
+    }
+
+    [Theory]
+    [InlineData("--db")]
+    [InlineData("--db=")]
+    public void Options_normalize_relative_database_paths_once(string option)
+    {
+        var options = option == "--db"
+            ? AppOptions.Parse([option, Path.Combine("relative-folder", "ledger.sqlite")])
+            : AppOptions.Parse([$"{option}{Path.Combine("relative-folder", "ledger.sqlite")}"]);
+
+        Assert.Equal(Path.GetFullPath(Path.Combine("relative-folder", "ledger.sqlite")), options.DatabasePath);
+    }
+
+    [Fact]
+    public void Report_refresh_gate_defers_hidden_work_and_refreshes_when_shown()
+    {
+        var gate = new ReportRefreshGate();
+
+        Assert.False(gate.TryConsumeRefresh());
+        Assert.False(gate.MarkDirty());
+        Assert.True(gate.SetVisible(true));
+        Assert.True(gate.TryConsumeRefresh());
+        Assert.False(gate.TryConsumeRefresh());
+
+        Assert.False(gate.SetVisible(false));
+        Assert.False(gate.MarkDirty());
+        Assert.True(gate.IsDirty);
+        Assert.True(gate.SetVisible(true));
+        Assert.True(gate.TryConsumeRefresh());
+    }
+
+    [Fact]
+    public void Tray_host_state_tracks_watcher_owner_acquisition_and_loss()
+    {
+        Assert.Null(TrayHostState.ApplyOwnerChanged("org.example.OtherService", ":1.42"));
+        Assert.True(TrayHostState.ApplyOwnerChanged(TrayHostState.WatcherName, ":1.42"));
+        Assert.False(TrayHostState.ApplyOwnerChanged(TrayHostState.WatcherName, ""));
+        Assert.False(TrayHostState.ConnectionLost());
+    }
+
+    [Fact]
+    public async Task Tray_host_detector_dispose_is_idempotent()
+    {
+        var detector = new TrayHostDetector();
+
+        await detector.DisposeAsync();
+        await detector.DisposeAsync();
     }
 
     [Fact]
@@ -174,6 +224,64 @@ public sealed class LinuxDesktopTests
 
         Assert.Equal(440, bitmap.PixelSize.Width);
         Assert.Equal(160, bitmap.PixelSize.Height);
+    }
+
+    [AvaloniaFact]
+    public async Task Hidden_window_skips_report_work_and_show_refreshes_once()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"wattledger-window-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        using var service = new WattLedgerService(Path.Combine(root, "ledger.sqlite"));
+        service.Database.Initialize();
+        var trayDetector = new TrayHostDetector();
+        var window = new MainWindow(
+            service,
+            startInTray: false,
+            shutdown: () => { },
+            monitorTrayHost: false,
+            trayHostDetector: trayDetector);
+
+        try
+        {
+            window.Show();
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.Empty(window.ChartSamples);
+
+            var originalSamples = window.ChartSamples;
+            window.Hide();
+            var sample = new WattLedger.Core.Models.SampleRecord
+            {
+                Timestamp = DateTimeOffset.Now,
+                PowerState = "Battery",
+                BatteryPercent = 61,
+                DischargeMw = 3200,
+                IsDischarging = true
+            };
+            service.Database.InsertSample(sample);
+            window.OnSampleRecorded(service, sample);
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.Same(originalSamples, window.ChartSamples);
+            Assert.Empty(window.ChartSamples);
+
+            window.ShowWindow();
+            var point = Assert.Single(window.ChartSamples);
+            Assert.Equal(sample.Timestamp.ToUnixTimeMilliseconds(), point.Timestamp.ToUnixTimeMilliseconds());
+            Assert.Equal(61, point.BatteryPercent);
+            Assert.Equal(3.2, point.Watts);
+
+            window.Hide();
+            trayDetector.SetAvailability(true);
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            trayDetector.NotifyConnectionLost();
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.True(window.IsVisible);
+        }
+        finally
+        {
+            await window.DisposeAsync();
+            window.Hide();
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static IReadOnlyList<string> DecodeExecValue(string value)

@@ -16,39 +16,61 @@ internal sealed class MainWindow : Window
 {
     private readonly WattLedgerService _service;
     private readonly bool _startInTray;
+    private readonly bool _monitorTrayHost;
     private readonly Action _shutdown;
+    private readonly ReportRefreshGate _reportRefresh = new();
     private readonly TextBlock _power = ValueText("—", 34, "#3DDC97");
     private readonly TextBlock _powerDetail = DetailText("Waiting for the first sample");
     private readonly TextBlock _battery = ValueText("—", 30, "#E9EEF5");
     private readonly TextBlock _batteryDetail = DetailText("Battery state unavailable");
     private readonly TextBlock _remaining = ValueText("—", 30, "#5AA9FF");
     private readonly TextBlock _remainingDetail = DetailText("Estimated from recent samples");
-    private readonly TextBlock _today = ValueText("0.0 Wh", 30, "#FFB454");
+    private readonly TextBlock _today = ValueText("0.0 Wh", 30, "#3DDC97");
     private readonly TextBlock _todayDetail = DetailText("No recorded battery use yet");
     private readonly TextBlock _status = DetailText("Starting local sampler…");
     private readonly TextBlock _platformStatus = DetailText("");
     private readonly TextBlock _powerState = DetailText("STARTING");
+    private readonly Border _powerStateDot = new()
+    {
+        Width = 8,
+        Height = 8,
+        CornerRadius = new CornerRadius(4),
+        Background = Brush("#5AA9FF"),
+        VerticalAlignment = VerticalAlignment.Center
+    };
     private readonly TextBlock _sampleCount = DetailText("No samples yet");
     private readonly StackPanel _ledgerRows = new() { Spacing = 0 };
     private readonly PowerChart _chart = new();
     private readonly Button _startupButton;
     private readonly TrayIcon _trayIcon;
-    private readonly DispatcherTimer _trayPollTimer = new() { Interval = TimeSpan.FromSeconds(5) };
+    private readonly DispatcherTimer _reportRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(350) };
+    private readonly TrayHostDetector _trayHostDetector;
     private bool _trayHostAvailable;
     private bool _trayRegistered;
     private bool _allowClose;
     private bool _disposed;
     private bool _checkingClose;
+    private LedgerStatus? _latestStatus;
+    private Task? _disposeTask;
+    private DateTimeOffset _lastReportRefreshUtc;
+    internal IReadOnlyList<PowerPoint> ChartSamples => _chart.Samples;
 
-    public MainWindow(WattLedgerService service, bool startInTray, Action shutdown)
+    public MainWindow(
+        WattLedgerService service,
+        bool startInTray,
+        Action shutdown,
+        bool monitorTrayHost = true,
+        TrayHostDetector? trayHostDetector = null)
     {
         _service = service;
         _startInTray = startInTray;
+        _monitorTrayHost = monitorTrayHost;
+        _trayHostDetector = trayHostDetector ?? new TrayHostDetector();
         _shutdown = shutdown;
         _startupButton = ActionButton(StartupRegistration.IsEnabled ? "Disable start at login" : "Start at login", ToggleStartup);
         Title = "WattLedger";
-        Width = 900;
-        Height = 720;
+        Width = 1120;
+        Height = 800;
         MinWidth = 740;
         MinHeight = 580;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -62,7 +84,8 @@ internal sealed class MainWindow : Window
         Opened += OnOpened;
         Closing += OnClosing;
         Closed += OnClosed;
-        _trayPollTimer.Tick += OnTrayPoll;
+        _reportRefreshTimer.Tick += OnReportRefresh;
+        _trayHostDetector.AvailabilityChanged += OnTrayHostAvailabilityChanged;
     }
 
     public void SetStartupError(string message) => Post(() => _status.Text = message);
@@ -82,7 +105,7 @@ internal sealed class MainWindow : Window
                 {
                     CreateHeader(),
                     CreateMetricGrid(),
-                    CreatePanel("TODAY’S POWER CURVE", _chart, 156),
+                    CreateChartPanel(),
                     CreateLedgerPanel(),
                     CreateFooter()
                 }
@@ -102,7 +125,7 @@ internal sealed class MainWindow : Window
         };
         var sub = new TextBlock
         {
-            Text = "A quiet, local energy journal",
+            Text = "Local-first battery energy journal",
             FontSize = 12,
             Foreground = Brush("#8B98A9"),
             Margin = new Thickness(0, 3, 0, 0)
@@ -115,8 +138,24 @@ internal sealed class MainWindow : Window
         _powerState.VerticalAlignment = VerticalAlignment.Center;
         var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         header.Children.Add(titleStack);
-        Grid.SetColumn(_powerState, 1);
-        header.Children.Add(_powerState);
+        var stateContents = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            Spacing = 8,
+            Children = { _powerStateDot, _powerState }
+        };
+        var statePill = new Border
+        {
+            Background = Brush("#14181F"),
+            BorderBrush = Brush("#273341"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(13, 7),
+            Child = stateContents,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(statePill, 1);
+        header.Children.Add(statePill);
         return header;
     }
 
@@ -127,10 +166,10 @@ internal sealed class MainWindow : Window
             ColumnDefinitions = new ColumnDefinitions("*,*,*,*"),
             ColumnSpacing = 12
         };
-        AddMetric(grid, 0, "POWER", _power, _powerDetail);
+        AddMetric(grid, 0, "LIVE POWER", _power, _powerDetail);
         AddMetric(grid, 1, "BATTERY", _battery, _batteryDetail);
         AddMetric(grid, 2, "TIME LEFT", _remaining, _remainingDetail);
-        AddMetric(grid, 3, "USED TODAY", _today, _todayDetail);
+        AddMetric(grid, 3, "TODAY", _today, _todayDetail);
         return grid;
     }
 
@@ -148,10 +187,11 @@ internal sealed class MainWindow : Window
         stack.Children.Add(detail);
         var card = new Border
         {
-            Background = Brush("#18212C"),
-            BorderBrush = Brush("#273341"),
+            Background = Brush("#14181F"),
+            BorderBrush = Brush("#232A35"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(15),
+            MinHeight = 128,
             Padding = new Thickness(15, 13),
             Child = stack
         };
@@ -159,19 +199,58 @@ internal sealed class MainWindow : Window
         grid.Children.Add(card);
     }
 
-    private static Control CreatePanel(string heading, Control child, double height)
+    private Control CreateChartPanel()
     {
-        var body = new StackPanel { Spacing = 10 };
-        body.Children.Add(PanelHeading(heading));
-        body.Children.Add(new Border
+        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        var heading = PanelHeading("Power & battery · today");
+        heading.FontSize = 15;
+        heading.Foreground = Brush("#E9EEF5");
+        header.Children.Add(heading);
+        var legend = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 18 };
+        legend.Children.Add(LegendItem("Power", "#3DDC97"));
+        legend.Children.Add(LegendItem("Battery", "#5AA9FF"));
+        Grid.SetColumn(legend, 1);
+        header.Children.Add(legend);
+        return PanelBorder(new StackPanel
         {
-            Height = height,
-            Background = Brush("#141C26"),
-            CornerRadius = new CornerRadius(9),
-            Child = child
+            Spacing = 14,
+            Children =
+            {
+                header,
+                new Border
+                {
+                    Height = 210,
+                    Background = Brush("#14181F"),
+                    CornerRadius = new CornerRadius(9),
+                    Child = _chart
+                }
+            }
         });
-        return body;
     }
+
+    private static Control LegendItem(string label, string color)
+    {
+        var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 7 };
+        row.Children.Add(new Border
+        {
+            Width = 16,
+            Height = 2,
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = Brush(color)
+        });
+        row.Children.Add(new TextBlock { Text = label, FontSize = 11, Foreground = Brush("#8B98A9") });
+        return row;
+    }
+
+    private static Border PanelBorder(Control child) => new()
+    {
+        Background = Brush("#14181F"),
+        BorderBrush = Brush("#232A35"),
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(15),
+        Padding = new Thickness(18, 16),
+        Child = child
+    };
 
     private Control CreateLedgerPanel()
     {
@@ -183,22 +262,18 @@ internal sealed class MainWindow : Window
         header.Children.Add(_sampleCount);
         panel.Children.Add(header);
 
-        panel.Children.Add(LedgerHeader());
+        var ledgerContent = new StackPanel { MinWidth = 650 };
+        ledgerContent.Children.Add(LedgerHeader());
+        ledgerContent.Children.Add(_ledgerRows);
         var ledger = new ScrollViewer
         {
             MaxHeight = 230,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = _ledgerRows
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = ledgerContent
         };
-        panel.Children.Add(new Border
-        {
-            Background = Brush("#141C26"),
-            BorderBrush = Brush("#273341"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9),
-            Child = ledger
-        });
-        return panel;
+        panel.Children.Add(ledger);
+        return PanelBorder(panel);
     }
 
     private Control CreateFooter()
@@ -284,21 +359,15 @@ internal sealed class MainWindow : Window
 
     private async void OnOpened(object? sender, EventArgs args)
     {
-        _trayPollTimer.Start();
+        _reportRefresh.SetVisible(true);
+        RefreshReportNow();
+        if (!_monitorTrayHost) return;
         try
         {
-            var hasWatcher = await TrayHostDetector.HasWatcherAsync();
-            _trayHostAvailable = hasWatcher && _trayRegistered;
-            if (!_trayHostAvailable)
-            {
-                _platformStatus.Text = "No StatusNotifier host found. WattLedger stays available in this window.";
-                return;
-            }
-
-            if (_startInTray)
-            {
-                Hide();
-            }
+            await _trayHostDetector.StartAsync();
+            _trayHostDetectorStarted = true;
+            _trayHostAvailable = _trayRegistered && _trayHostDetector.IsAvailable == true;
+            if (_startInTray && _trayHostAvailable) HideToTray();
         }
         catch (Exception ex)
         {
@@ -322,15 +391,22 @@ internal sealed class MainWindow : Window
 
     private async Task CheckCloseDestinationAsync()
     {
-        bool available;
-        try { available = _trayRegistered && await TrayHostDetector.HasWatcherAsync(); }
-        catch { available = false; }
-
-        _trayHostAvailable = available;
+        var available = _trayRegistered && _trayHostDetector.IsAvailable == true;
+        if (!_trayHostDetectorStarted)
+        {
+            try
+            {
+                await _trayHostDetector.StartAsync();
+                _trayHostDetectorStarted = true;
+                _trayHostAvailable = _trayRegistered && _trayHostDetector.IsAvailable == true;
+                available = _trayHostAvailable;
+            }
+            catch { available = false; }
+        }
         _checkingClose = false;
         if (available)
         {
-            Hide();
+            HideToTray();
             _platformStatus.Text = "WattLedger is still running in the system tray.";
         }
         else
@@ -341,63 +417,97 @@ internal sealed class MainWindow : Window
         }
     }
 
-    private async void HideToTrayAsync()
+    private void HideToTrayAsync()
     {
-        try
-        {
-            if (_trayRegistered && await TrayHostDetector.HasWatcherAsync())
-            {
-                _trayHostAvailable = true;
-                Hide();
-                _platformStatus.Text = "WattLedger is still running in the system tray.";
-                return;
-            }
-        }
-        catch { }
-
-        _trayHostAvailable = false;
-        _platformStatus.Text = "No StatusNotifier host is available; the window stays open.";
+        if (_trayRegistered && _trayHostAvailable) HideToTray();
+        else _platformStatus.Text = "No StatusNotifier host is available; the window stays open.";
     }
 
-    private async void OnTrayPoll(object? sender, EventArgs args)
+    private void HideToTray()
     {
-        try
-        {
-            var available = _trayRegistered && await TrayHostDetector.HasWatcherAsync();
-            if (_trayHostAvailable && !available && !IsVisible)
-            {
-                ShowWindow();
-                _platformStatus.Text = "System tray host disappeared; WattLedger window restored.";
-            }
-            _trayHostAvailable = available;
-        }
-        catch
-        {
-            if (_trayHostAvailable && !IsVisible)
-            {
-                ShowWindow();
-                _platformStatus.Text = "System tray host is unreachable; WattLedger window restored.";
-            }
-            _trayHostAvailable = false;
-        }
+        _reportRefresh.SetVisible(false);
+        _reportRefreshTimer.Stop();
+        Hide();
+        _platformStatus.Text = "WattLedger is still running in the system tray.";
     }
+
+    private bool _trayHostDetectorStarted;
+
+    internal void OnTrayHostAvailabilityChanged(object? sender, bool available) => Post(() =>
+    {
+        available &= _trayRegistered;
+        var disappeared = _trayHostAvailable && !available;
+        _trayHostAvailable = available;
+        if (available && !IsVisible && _startInTray) return;
+        if (!available && !IsVisible && disappeared)
+        {
+            ShowWindow();
+            _platformStatus.Text = "System tray host disappeared; WattLedger window restored.";
+        }
+        else if (!available && IsVisible)
+        {
+            _platformStatus.Text = "No StatusNotifier host found. WattLedger stays available in this window.";
+        }
+    });
 
     private void OnClosed(object? sender, EventArgs args)
     {
+        _ = DisposeAsync();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _disposeTask ??= DisposeCoreAsync();
+        return new ValueTask(_disposeTask);
+    }
+
+    private async Task DisposeCoreAsync()
+    {
         _disposed = true;
-        _trayPollTimer.Stop();
+        _reportRefreshTimer.Stop();
+        _reportRefreshTimer.Tick -= OnReportRefresh;
+        _trayHostDetector.AvailabilityChanged -= OnTrayHostAvailabilityChanged;
         _service.StatusUpdated -= OnStatusUpdated;
         _service.SampleRecorded -= OnSampleRecorded;
         _service.Error -= OnError;
+        await _trayHostDetector.DisposeAsync();
         _trayIcon.Dispose();
         TrayIcon.SetIcons(Application.Current!, new TrayIcons());
     }
 
-    private void OnStatusUpdated(object? sender, LedgerStatus status) => Post(() => ApplyStatus(status));
+    private void OnStatusUpdated(object? sender, LedgerStatus status) => Post(() =>
+    {
+        _latestStatus = status;
+        if (IsVisible) ApplyStatus(status);
+        else UpdateTrayTooltip(status);
+    });
 
-    private void OnSampleRecorded(object? sender, SampleRecord sample) => Post(RefreshReport);
+    internal void OnSampleRecorded(object? sender, SampleRecord sample) => Post(() =>
+    {
+        var becameVisible = _reportRefresh.SetVisible(IsVisible);
+        if (!IsVisible)
+        {
+            _reportRefreshTimer.Stop();
+        }
 
-    private void OnError(object? sender, string message) => Post(() => _status.Text = $"Sampling error: {message}");
+        if (becameVisible)
+        {
+            _reportRefresh.MarkDirty();
+            RefreshReportNow();
+            return;
+        }
+
+        if (_reportRefresh.MarkDirty())
+        {
+            ScheduleReportRefresh();
+        }
+    });
+
+    private void OnError(object? sender, string message) => Post(() =>
+    {
+        if (IsVisible) _status.Text = $"Sampling error: {message}";
+        else _trayIcon.ToolTipText = "WattLedger · sampling error";
+    });
 
     private void ApplyStatus(LedgerStatus status)
     {
@@ -451,13 +561,45 @@ internal sealed class MainWindow : Window
             : battery.IsCharging ? "CHARGING"
             : battery.IsDischarging ? "ON BATTERY"
             : battery.IsAcOnline ? "AC POWER" : "STATE UNKNOWN";
-        _powerState.Foreground = Brush(battery.IsCharging || battery.IsAcOnline ? "#5AA9FF" : battery.IsDischarging ? "#3DDC97" : "#8B98A9");
+        var stateColor = battery.IsCharging || battery.IsAcOnline ? "#5AA9FF" : battery.IsDischarging ? "#3DDC97" : "#8B98A9";
+        _powerState.Foreground = Brush(stateColor);
+        _powerStateDot.Background = Brush(stateColor);
         _status.Text = $"Recording locally · last sample {status.Timestamp.ToLocalTime():HH:mm:ss}";
         _trayIcon.ToolTipText = $"WattLedger · {_battery.Text} · {_power.Text}";
     }
 
-    private void RefreshReport()
+    private void OnReportRefresh(object? sender, EventArgs args)
     {
+        _reportRefreshTimer.Stop();
+        RefreshReportNow();
+    }
+
+    private void ScheduleReportRefresh()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var delay = TimeSpan.FromMilliseconds(350);
+        if (_lastReportRefreshUtc != default)
+        {
+            var earliest = _lastReportRefreshUtc.AddSeconds(20) - now;
+            if (earliest > delay) delay = earliest;
+        }
+
+        _reportRefreshTimer.Stop();
+        _reportRefreshTimer.Interval = delay;
+        _reportRefreshTimer.Start();
+    }
+
+    private void RefreshReportNow()
+    {
+        _reportRefresh.SetVisible(IsVisible);
+        if (!IsVisible)
+        {
+            _reportRefreshTimer.Stop();
+            return;
+        }
+
+        if (!_reportRefresh.TryConsumeRefresh()) return;
+        _lastReportRefreshUtc = DateTimeOffset.UtcNow;
         try
         {
             var report = _service.GetTodayReport();
@@ -468,7 +610,7 @@ internal sealed class MainWindow : Window
             var start = new DateTimeOffset(DateTime.Today);
             var now = DateTimeOffset.Now;
             var samples = _service.GetSamples(start, now, 240);
-            _chart.Samples = samples.Select(sample => new PowerPoint(sample.Timestamp, sample.NetDischargeWatts)).ToArray();
+            _chart.Samples = samples.Select(sample => new PowerPoint(sample.Timestamp, sample.NetDischargeWatts, sample.BatteryPercent)).ToArray();
             _sampleCount.Text = $"{samples.Count} samples";
             _ledgerRows.Children.Clear();
             foreach (var session in report.Sessions.Where(session => session.DurationSeconds > 0)
@@ -498,10 +640,10 @@ internal sealed class MainWindow : Window
     {
         var grid = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("1.15*,1.15*,1.1*,1.1*,1*,1*"),
+            ColumnDefinitions = new ColumnDefinitions("1.15*,1.15*,1.1*,1.1*,1*,1*,.8*"),
             Margin = new Thickness(12, 0, 12, 5)
         };
-        string[] headings = ["START", "END", "STATE", "DURATION", "BATTERY", "ENERGY"];
+        string[] headings = ["START", "END", "STATE", "DURATION", "BATTERY", "ENERGY", "AVG W"];
         for (var index = 0; index < headings.Length; index++)
         {
             var label = new TextBlock { Text = headings[index], FontSize = 9, Foreground = Brush("#758395") };
@@ -515,20 +657,21 @@ internal sealed class MainWindow : Window
     {
         var grid = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("1.15*,1.15*,1.1*,1.1*,1*,1*"),
+            ColumnDefinitions = new ColumnDefinitions("1.15*,1.15*,1.1*,1.1*,1*,1*,.8*"),
             Margin = new Thickness(12, 8, 12, 8)
         };
         var fields = new[]
         {
-            session.Start.ToLocalTime().ToString("HH:mm"),
-            session.End.ToLocalTime().ToString("HH:mm"),
+            session.Start.ToLocalTime().ToString("HH:mm:ss"),
+            session.End.ToLocalTime().ToString("HH:mm:ss"),
             SessionStateLabel(session),
             ReportBuilder.FormatDuration(session.DurationSeconds),
             $"{FormatPercent(session.StartPercent)} → {FormatPercent(session.EndPercent)}",
             (session.Type is "SleepGap" or "ModernStandby") &&
             session.Note?.Contains("energy unavailable", StringComparison.OrdinalIgnoreCase) == true
                 ? "Unavailable"
-                : $"{session.EnergyWh:0.00} Wh"
+                : $"{session.EnergyWh:0.00} Wh",
+            FormatAverageWatts(session)
         };
         for (var index = 0; index < fields.Length; index++)
         {
@@ -559,6 +702,15 @@ internal sealed class MainWindow : Window
         }
 
         return ReportBuilder.StateLabel(session.Type).Split('·')[0].Trim();
+    }
+
+    private static string FormatAverageWatts(SessionRecord session)
+    {
+        var energyUnavailable = (session.Type is "SleepGap" or "ModernStandby") &&
+                                session.Note?.Contains("energy unavailable", StringComparison.OrdinalIgnoreCase) == true;
+        return energyUnavailable || session.DurationSeconds <= 0
+            ? "—"
+            : $"{session.AverageWatts:0.0} W";
     }
 
     private async void ExportAsync(string format)
@@ -640,11 +792,24 @@ internal sealed class MainWindow : Window
         }
     }
 
-    private void ShowWindow()
+    public void ShowWindow()
     {
         Show();
         WindowState = WindowState.Normal;
         Activate();
+        if (_reportRefresh.SetVisible(IsVisible)) RefreshReportNow();
+        if (_latestStatus is not null) ApplyStatus(_latestStatus);
+    }
+
+    private void UpdateTrayTooltip(LedgerStatus status)
+    {
+        var battery = status.Battery.Percent is { } percent ? $"{percent}%" : "—";
+        var rate = status.Battery.IsDischarging && status.Battery.DischargeWatts is { } discharge
+            ? $"−{discharge:0.0} W"
+            : status.Battery.IsCharging && status.Battery.ChargeWatts is { } charge
+                ? $"+{charge:0.0} W"
+                : "—";
+        _trayIcon.ToolTipText = $"WattLedger · {battery} · {rate}";
     }
 
     private void Quit()

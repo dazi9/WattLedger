@@ -57,9 +57,13 @@ public sealed class App : Application
         {
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime { MainWindow: { } window })
             {
-                window.Show();
-                window.WindowState = Avalonia.Controls.WindowState.Normal;
-                window.Activate();
+                if (window is MainWindow mainWindow) mainWindow.ShowWindow();
+                else
+                {
+                    window.Show();
+                    window.WindowState = Avalonia.Controls.WindowState.Normal;
+                    window.Activate();
+                }
             }
         });
     }
@@ -103,25 +107,41 @@ public sealed class App : Application
 
     private async Task PrepareShutdownAsync()
     {
+        if (_startupTask is not null)
+        {
+            try { await _startupTask; }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceError("WattLedger startup cleanup issue: {0}", ex); }
+        }
+
+        if (_window is not null)
+        {
+            try { await _window.DisposeAsync(); }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceError("WattLedger window cleanup issue: {0}", ex); }
+        }
+
+        if (_logind is not null)
+        {
+            try { await _logind.DisposeAsync(); }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceError("WattLedger logind cleanup issue: {0}", ex); }
+        }
+
         try
         {
-            if (_startupTask is not null) await _startupTask;
-            if (_logind is not null) await _logind.DisposeAsync();
             if (_service is not null) await _service.StopAsync();
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Trace.TraceError("WattLedger shutdown issue: {0}", ex);
+            System.Diagnostics.Trace.TraceError("WattLedger sampler stop issue: {0}", ex);
         }
-        finally
-        {
-            try { _service?.Dispose(); }
-            catch (Exception ex) { System.Diagnostics.Trace.TraceError("WattLedger service cleanup issue: {0}", ex); }
-            _singleInstance?.Dispose();
-            _lifetime?.Dispose();
-            _shutdownPrepared = true;
-            (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
-        }
+
+        try { _service?.Dispose(); }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceError("WattLedger service cleanup issue: {0}", ex); }
+        try { _singleInstance?.Dispose(); }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceError("WattLedger instance cleanup issue: {0}", ex); }
+        try { _lifetime?.Dispose(); }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceError("WattLedger lifetime cleanup issue: {0}", ex); }
+        _shutdownPrepared = true;
+        (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
     }
 
     private void OnExit(object? sender, ControlledApplicationLifetimeExitEventArgs args)
@@ -156,6 +176,11 @@ internal sealed record AppOptions(string? DatabasePath, bool StartInTray)
             {
                 databasePath = args[index][5..];
             }
+        }
+
+        if (!string.IsNullOrWhiteSpace(databasePath))
+        {
+            databasePath = Path.GetFullPath(databasePath);
         }
 
         return new AppOptions(databasePath, startInTray);

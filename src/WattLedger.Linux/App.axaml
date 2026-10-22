@@ -5,8 +5,8 @@
   <Application.Styles>
     <FluentTheme />
     <Style Selector="Window">
-      <Setter Property="Background" Value="#10151D" />
-      <Setter Property="Foreground" Value="#E9EEF5" />
+      <Setter Property="Background" Value="#0B0D10" />
+      <Setter Property="Foreground" Value="#E6EDF3" />
     </Style>
   </Application.Styles>
 </Application>
