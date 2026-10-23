@@ -22,13 +22,13 @@ internal sealed class MainWindow : Window
     private readonly Action _shutdown;
     private readonly ReportRefreshGate _reportRefresh = new();
     private readonly DashboardDataLoader _dataLoader;
-    private readonly TextBlock _power = ValueText("—", 34, "#3DDC97");
+    private readonly TextBlock _power = ValueText("—", 34, "GreenBrush");
     private readonly TextBlock _powerDetail = DetailText("Waiting for the first sample");
-    private readonly TextBlock _battery = ValueText("—", 30, "#E9EEF5");
+    private readonly TextBlock _battery = ValueText("—", 30, "TextBrush");
     private readonly TextBlock _batteryDetail = DetailText("Battery state unavailable");
-    private readonly TextBlock _remaining = ValueText("—", 30, "#5AA9FF");
+    private readonly TextBlock _remaining = ValueText("—", 30, "BlueBrush");
     private readonly TextBlock _remainingDetail = DetailText("Estimated from recent samples");
-    private readonly TextBlock _today = ValueText("0.0 Wh", 30, "#3DDC97");
+    private readonly TextBlock _today = ValueText("0.0 Wh", 30, "GreenBrush");
     private readonly TextBlock _todayDetail = DetailText("No recorded battery use yet");
     private readonly TextBlock _status = DetailText("Starting local sampler…");
     private readonly TextBlock _platformStatus = DetailText("");
@@ -38,7 +38,7 @@ internal sealed class MainWindow : Window
         Width = 8,
         Height = 8,
         CornerRadius = new CornerRadius(4),
-        Background = Brush("#5AA9FF"),
+        Background = Brush("BlueBrush"),
         VerticalAlignment = VerticalAlignment.Center
     };
     private readonly TextBlock _sampleCount = DetailText("No samples yet");
@@ -127,8 +127,8 @@ internal sealed class MainWindow : Window
         _startupError = message;
         _status.Text = message;
         _powerState.Text = "NOT RECORDING";
-        _powerState.Foreground = Brush("#F4BB66");
-        _powerStateDot.Background = Brush("#F4BB66");
+        _powerState.Foreground = Brush("OrangeBrush");
+        _powerStateDot.Background = Brush("OrangeBrush");
         _trayIcon.ToolTipText = "WattLedger · not recording";
         ShowWindow();
     });
@@ -164,19 +164,19 @@ internal sealed class MainWindow : Window
             Text = "WattLedger",
             FontSize = 25,
             FontWeight = FontWeight.SemiBold,
-            Foreground = Brush("#F3F6FA")
+            Foreground = Brush("TextBrush")
         };
         var sub = new TextBlock
         {
             Text = "Local-first battery energy journal",
             FontSize = 12,
-            Foreground = Brush("#8B98A9"),
+            Foreground = Brush("MutedBrush"),
             Margin = new Thickness(0, 3, 0, 0)
         };
         var titleStack = new StackPanel { Children = { title, sub } };
         _powerState.FontSize = 11;
         _powerState.FontWeight = FontWeight.SemiBold;
-        _powerState.Foreground = Brush("#5AA9FF");
+        _powerState.Foreground = Brush("BlueBrush");
         _powerState.HorizontalAlignment = HorizontalAlignment.Right;
         _powerState.VerticalAlignment = VerticalAlignment.Center;
         var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
@@ -189,8 +189,8 @@ internal sealed class MainWindow : Window
         };
         var statePill = new Border
         {
-            Background = Brush("#14181F"),
-            BorderBrush = Brush("#273341"),
+            Background = Brush("CardBrush"),
+            BorderBrush = Brush("BorderBrush"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(18),
             Padding = new Thickness(13, 7),
@@ -224,14 +224,14 @@ internal sealed class MainWindow : Window
             Text = label,
             FontSize = 10,
             FontWeight = FontWeight.SemiBold,
-            Foreground = Brush("#8793A2")
+            Foreground = Brush("MutedBrush")
         });
         stack.Children.Add(value);
         stack.Children.Add(detail);
         var card = new Border
         {
-            Background = Brush("#14181F"),
-            BorderBrush = Brush("#232A35"),
+            Background = Brush("CardBrush"),
+            BorderBrush = Brush("BorderBrush"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(15),
             MinHeight = 128,
@@ -247,11 +247,11 @@ internal sealed class MainWindow : Window
         var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         var heading = PanelHeading("Power & battery · today");
         heading.FontSize = 15;
-        heading.Foreground = Brush("#E9EEF5");
+        heading.Foreground = Brush("TextBrush");
         header.Children.Add(heading);
         var legend = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 18 };
-        legend.Children.Add(LegendItem("Power (+ discharge / − charge)", "#3DDC97"));
-        legend.Children.Add(LegendItem("Battery", "#5AA9FF"));
+        legend.Children.Add(LegendItem("Power (+ discharge / − charge)", "GreenBrush"));
+        legend.Children.Add(LegendItem("Battery", "BlueBrush"));
         Grid.SetColumn(legend, 1);
         header.Children.Add(legend);
         var tools = new WrapPanel();
@@ -295,7 +295,7 @@ internal sealed class MainWindow : Window
                 new Border
                 {
                     Height = 240,
-                    Background = Brush("#14181F"),
+                    Background = Brush("CardBrush"),
                     CornerRadius = new CornerRadius(9),
                     Child = _chart
                 },
@@ -392,14 +392,14 @@ internal sealed class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Background = Brush(color)
         });
-        row.Children.Add(new TextBlock { Text = label, FontSize = 11, Foreground = Brush("#8B98A9") });
+        row.Children.Add(new TextBlock { Text = label, FontSize = 11, Foreground = Brush("MutedBrush") });
         return row;
     }
 
     private static Border PanelBorder(Control child) => new()
     {
-        Background = Brush("#14181F"),
-        BorderBrush = Brush("#232A35"),
+        Background = Brush("CardBrush"),
+        BorderBrush = Brush("BorderBrush"),
         BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(15),
         Padding = new Thickness(18, 16),
@@ -440,6 +440,7 @@ internal sealed class MainWindow : Window
         bar.Children.Add(_startupButton);
         bar.Children.Add(ActionButton("Hide to tray", HideToTrayAsync));
         bar.Children.Add(ActionButton("Quit", Quit));
+        bar.Children.Add(CreateThemeSelector());
         var footer = new StackPanel { Spacing = 9 };
         footer.Children.Add(bar);
         footer.Children.Add(_status);
@@ -447,12 +448,44 @@ internal sealed class MainWindow : Window
         return footer;
     }
 
+    private Control CreateThemeSelector()
+    {
+        var selector = new ComboBox
+        {
+            ItemsSource = Enum.GetValues<ThemeMode>(),
+            SelectedItem = (Application.Current as App)?.CurrentThemeMode ?? ThemeMode.System,
+            Width = 112,
+            Margin = new Thickness(0, 0, 8, 8)
+        };
+        Avalonia.Automation.AutomationProperties.SetName(selector, "Color theme");
+        ToolTip.SetTip(selector, "Color theme: System follows the desktop appearance");
+        selector.SelectionChanged += (_, _) =>
+        {
+            if (Application.Current is not App app || selector.SelectedItem is not ThemeMode mode || mode == app.CurrentThemeMode) return;
+            try { app.SetThemeMode(mode); }
+            catch (Exception ex)
+            {
+                _platformStatus.Text = $"Could not save theme preference: {ex.Message}";
+                selector.SelectedItem = app.CurrentThemeMode;
+            }
+        };
+        return new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Children =
+            {
+                new TextBlock { Text = "Theme", Foreground = Brush("MutedBrush"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8) },
+                selector
+            }
+        };
+    }
+
     private static TextBlock PanelHeading(string value) => new()
     {
         Text = value,
         FontSize = 10,
         FontWeight = FontWeight.SemiBold,
-        Foreground = Brush("#A9B5C3")
+        Foreground = Brush("MutedBrush")
     };
 
     private static Button ActionButton(string text, Action action)
@@ -463,9 +496,9 @@ internal sealed class MainWindow : Window
             Margin = new Thickness(0, 0, 8, 8),
             Padding = new Thickness(12, 7),
             FontSize = 11,
-            Background = Brush("#202B38"),
-            Foreground = Brush("#E9EEF5"),
-            BorderBrush = Brush("#334253"),
+            Background = Brush("ButtonBrush"),
+            Foreground = Brush("TextBrush"),
+            BorderBrush = Brush("BorderBrush"),
             BorderThickness = new Thickness(1)
         };
         button.Click += (_, _) => action();
@@ -690,7 +723,7 @@ internal sealed class MainWindow : Window
             : battery.IsCharging && power is { } charge
                 ? $"−{charge:0.0} W"
                 : "—";
-        _power.Foreground = Brush(battery.IsCharging ? "#5AA9FF" : battery.IsDischarging ? "#3DDC97" : "#8B98A9");
+        _power.Foreground = Brush(battery.IsCharging ? "BlueBrush" : battery.IsDischarging ? "GreenBrush" : "MutedBrush");
         _powerDetail.Text = status.Rapl.PackageWatts is { } package
             ? $"SoC {package:0.0} W · CPU {status.Rapl.CpuWatts.GetValueOrDefault():0.0} W"
             : power is not null ? estimatedPower ? "Estimated from capacity change" : battery.IsCharging ? "Battery charging" : "Battery discharge" : "Power rate unavailable";
@@ -722,7 +755,7 @@ internal sealed class MainWindow : Window
             : battery.IsCharging ? "CHARGING"
             : battery.IsDischarging ? "ON BATTERY"
             : battery.IsAcOnline ? "AC POWER" : "STATE UNKNOWN";
-        var stateColor = battery.IsCharging || battery.IsAcOnline ? "#5AA9FF" : battery.IsDischarging ? "#3DDC97" : "#8B98A9";
+        var stateColor = battery.IsCharging || battery.IsAcOnline ? "BlueBrush" : battery.IsDischarging ? "GreenBrush" : "MutedBrush";
         _powerState.Foreground = Brush(stateColor);
         _powerStateDot.Background = Brush(stateColor);
         _status.Text = battery.IsCharging || battery.IsDischarging || battery.IsAcOnline
@@ -796,7 +829,7 @@ internal sealed class MainWindow : Window
                 _ledgerRows.Children.Add(new TextBlock
                 {
                     Text = "Ledger entries appear as battery and charging sessions are recorded.",
-                    Foreground = Brush("#8390A0"),
+                    Foreground = Brush("MutedBrush"),
                     FontSize = 11,
                     Margin = new Thickness(12, 10)
                 });
@@ -823,7 +856,7 @@ internal sealed class MainWindow : Window
         string[] headings = ["START", "END", "STATE", "DURATION", "BATTERY", "ENERGY", "AVG W"];
         for (var index = 0; index < headings.Length; index++)
         {
-            var label = new TextBlock { Text = headings[index], FontSize = 9, Foreground = Brush("#758395") };
+            var label = new TextBlock { Text = headings[index], FontSize = 9, Foreground = Brush("MutedBrush") };
             Grid.SetColumn(label, index);
             grid.Children.Add(label);
         }
@@ -852,14 +885,14 @@ internal sealed class MainWindow : Window
         };
         for (var index = 0; index < fields.Length; index++)
         {
-            var text = new TextBlock { Text = fields[index], FontSize = 10, Foreground = Brush("#CDD5DF") };
+            var text = new TextBlock { Text = fields[index], FontSize = 10, Foreground = Brush("TextBrush") };
             Grid.SetColumn(text, index);
             grid.Children.Add(text);
         }
 
         return new Border
         {
-            BorderBrush = Brush("#25313E"),
+            BorderBrush = Brush("BorderBrush"),
             BorderThickness = new Thickness(0, 0, 0, 1),
             Child = grid
         };
@@ -1030,9 +1063,9 @@ internal sealed class MainWindow : Window
     {
         Text = value,
         FontSize = 10,
-        Foreground = Brush("#8B98A9"),
+        Foreground = Brush("MutedBrush"),
         TextWrapping = TextWrapping.Wrap
     };
 
-    private static SolidColorBrush Brush(string value) => new(Color.Parse(value));
+    private static SolidColorBrush Brush(string key) => ThemeResources.Brush(key);
 }

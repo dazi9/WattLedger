@@ -21,6 +21,7 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        InitializeTheme();
 
         _mutex = new Mutex(true, @"Local\WattLedger.SingleInstance", out var createdNew);
         _ownsMutex = createdNew;
@@ -167,6 +168,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _exiting = true;
+        ShutdownTheme();
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         if (_service is not null) _service.StatusUpdated -= OnStatusUpdated;
         _service?.Dispose();

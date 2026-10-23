@@ -1,3 +1,5 @@
+using DesktopThemeMode = WattLedger.Desktop.ThemeMode;
+using WattLedger.Desktop;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -28,6 +30,13 @@ public partial class MainWindow : Window
         _service = service;
         _viewModel = new MainViewModel(service);
         DataContext = _viewModel;
+        ThemeSelector.ItemsSource = Enum.GetValues<DesktopThemeMode>();
+        ThemeSelector.SelectedItem = (Application.Current as App)?.CurrentThemeMode ?? DesktopThemeMode.System;
+        if (Application.Current is App app) app.ThemeChanged += OnThemeChanged;
+        Closed += (_, _) =>
+        {
+            if (Application.Current is App current) current.ThemeChanged -= OnThemeChanged;
+        };
 
         var workArea = SystemParameters.WorkArea;
         Width = Math.Min(1120, Math.Max(960, workArea.Width - 40));
@@ -50,10 +59,16 @@ public partial class MainWindow : Window
     {
         base.OnSourceInitialized(e);
 
+        UpdateTitleBarTheme();
+    }
+
+    private void UpdateTitleBarTheme()
+    {
         try
         {
             var handle = new WindowInteropHelper(this).Handle;
-            var dark = 1;
+            if (handle == IntPtr.Zero) return;
+            var dark = (Application.Current as App)?.IsDarkTheme == true ? 1 : 0;
             if (DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int)) != 0)
             {
                 DwmSetWindowAttribute(handle, 19, ref dark, sizeof(int));
@@ -62,6 +77,24 @@ public partial class MainWindow : Window
         catch
         {
             // Dark title bar is cosmetic; ignore on older Windows builds.
+        }
+    }
+
+    private void OnThemeChanged(object? sender, EventArgs args)
+    {
+        UpdateTitleBarTheme();
+        _viewModel.RefreshTheme();
+        DrawChart();
+    }
+
+    private void ThemeSelector_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (Application.Current is not App app || ThemeSelector.SelectedItem is not DesktopThemeMode mode || mode == app.CurrentThemeMode) return;
+        try { app.SetThemeMode(mode); }
+        catch (Exception ex)
+        {
+            ThemeSelector.SelectedItem = app.CurrentThemeMode;
+            MessageBox.Show(this, ex.Message, "Could not save theme preference", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -296,8 +329,8 @@ public partial class MainWindow : Window
             {
                 Points = areaPoints,
                 Fill = new LinearGradientBrush(
-                    Color.FromArgb(80, 61, 220, 151),
-                    Color.FromArgb(0, 61, 220, 151),
+                    (Color)FindResource("ChartAreaTopColor"),
+                    (Color)FindResource("ChartAreaBottomColor"),
                     new Point(0, 0),
                     new Point(0, 1)),
                 StrokeThickness = 0
