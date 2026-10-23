@@ -42,7 +42,7 @@ WattLedger is deliberately narrow:
 ## Quick start
 
 ```powershell
-git clone https://github.com/your-name/WattLedger.git
+git clone https://github.com/dazi9/WattLedger.git
 cd WattLedger
 
 dotnet build WattLedger.slnx -c Release
