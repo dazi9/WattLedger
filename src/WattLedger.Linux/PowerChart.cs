@@ -1,11 +1,10 @@
+using WattLedger.Desktop;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 
 namespace WattLedger.Linux;
-
-internal sealed record PowerPoint(DateTimeOffset Timestamp, double? Watts, int? BatteryPercent = null, bool BreakBefore = false);
 
 internal sealed class PowerChart : Control
 {
@@ -39,17 +38,35 @@ internal sealed class PowerChart : Control
     private ChartTimeRange _dragRange;
     private DateTimeOffset? _selectionAnchor;
     private bool _panning;
+    private ChartInteractionMode _interactionMode;
+    private double _followWindowSeconds = 30 * 60;
 
     public PowerChart()
     {
         Focusable = true;
         ClipToBounds = true;
+        UpdateCursor();
     }
 
     public event EventHandler? SelectionChanged;
     public event EventHandler? ViewChanged;
     public ChartSelectionStatistics? Selection { get; private set; }
-    public ChartTimeRange VisibleRange => _viewport ?? ChartSeries.Extent(_samples);
+    public ChartTimeRange DataRange => ChartSeries.Extent(_samples);
+    public ChartTimeRange VisibleRange => _viewport ?? DataRange;
+    public bool IsFollowingLive { get; private set; } = true;
+    public bool CanPanEarlier => VisibleRange.Start > DataRange.Start;
+    public bool CanPanLater => VisibleRange.End < DataRange.End;
+    public ChartInteractionMode InteractionMode
+    {
+        get => _interactionMode;
+        set
+        {
+            if (_interactionMode == value) return;
+            _interactionMode = value;
+            UpdateCursor();
+            ViewChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
 
     public IReadOnlyList<PowerPoint> Samples
     {
@@ -57,11 +74,14 @@ internal sealed class PowerChart : Control
         set
         {
             _samples = ChartSeries.Normalize(value);
-            if (_viewport is { } view)
+            var extent = DataRange;
+            if (_viewport is { } prior && (prior.End < extent.Start || prior.Start > extent.End))
             {
-                var extent = ChartSeries.Extent(_samples);
-                _viewport = view.End < extent.Start || view.Start > extent.End ? null : view.Pan(0, extent);
+                IsFollowingLive = true;
+                _followWindowSeconds = 30 * 60;
             }
+            if (IsFollowingLive) _viewport = LatestRange(extent, _followWindowSeconds);
+            else if (_viewport is { } view) _viewport = view.Pan(0, extent);
             if (Selection is { } selection)
             {
                 if (_samples.Length == 0 || selection.End < _samples[0].Timestamp || selection.Start > _samples[^1].Timestamp)
@@ -77,9 +97,30 @@ internal sealed class PowerChart : Control
     public void Zoom(double factor) => ZoomAt(factor, .5);
     public void ResetView()
     {
-        _viewport = null;
+        IsFollowingLive = false;
+        _viewport = DataRange;
         ChangedView();
     }
+    public void FollowLive()
+    {
+        var extent = DataRange;
+        _followWindowSeconds = VisibleRange.Seconds >= extent.Seconds ? 30 * 60 : VisibleRange.Seconds;
+        IsFollowingLive = true;
+        _viewport = LatestRange(extent, _followWindowSeconds);
+        ChangedView();
+    }
+    public void Pan(double seconds)
+    {
+        if (!double.IsFinite(seconds)) return;
+        IsFollowingLive = false;
+        _viewport = VisibleRange.Pan(seconds, DataRange);
+        ChangedView();
+    }
+    private static ChartTimeRange LatestRange(ChartTimeRange extent, double seconds) =>
+        new(extent.End.AddSeconds(-Math.Min(seconds, extent.Seconds)), extent.End);
+    private void UpdateCursor() => Cursor = new Cursor(
+        InteractionMode == ChartInteractionMode.Pan ? StandardCursorType.SizeAll : StandardCursorType.Cross);
+
     public void ClearSelection()
     {
         Selection = null;
@@ -97,11 +138,13 @@ internal sealed class PowerChart : Control
     {
         if (Selection is not { DurationSeconds: > 0 } selected) return;
         var range = new ChartTimeRange(selected.Start, selected.End);
+        IsFollowingLive = false;
         _viewport = range.Zoom(1, .5, ChartSeries.Extent(_samples));
         ChangedView();
     }
     private void ZoomAt(double factor, double anchor)
     {
+        IsFollowingLive = false;
         _viewport = VisibleRange.Zoom(factor, anchor, ChartSeries.Extent(_samples));
         ChangedView();
     }
@@ -120,7 +163,13 @@ internal sealed class PowerChart : Control
         var layout = EnsureLayout();
         var point = e.GetPosition(this);
         if (!InPlot(point, layout)) return;
-        ZoomAt(Math.Pow(.8, Math.Clamp(e.Delta.Y, -5, 5)), (point.X - layout.PlotLeft) / (layout.PlotRight - layout.PlotLeft));
+        // A two-finger horizontal scroll moves the plotted content with the gesture.
+        // Prefer the dominant axis so a little diagonal noise does not zoom while panning.
+        if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && Math.Abs(e.Delta.X) > Math.Abs(e.Delta.Y))
+            Pan(-e.Delta.X * VisibleRange.Seconds * .1);
+        else if (e.Delta.Y != 0)
+            ZoomAt(Math.Pow(.8, Math.Clamp(e.Delta.Y, -5, 5)), (point.X - layout.PlotLeft) / (layout.PlotRight - layout.PlotLeft));
+        else return;
         e.Handled = true;
     }
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -140,7 +189,9 @@ internal sealed class PowerChart : Control
         }
         _dragStart = point;
         _dragRange = VisibleRange;
-        _panning = properties.IsMiddleButtonPressed || e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        _panning = InteractionMode == ChartInteractionMode.Pan || properties.IsMiddleButtonPressed || e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        IsFollowingLive = false;
+        ChangedView();
         if (!_panning)
         {
             _selectionAnchor = ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange)?.Timestamp;
@@ -201,8 +252,9 @@ internal sealed class PowerChart : Control
             case Key.Home: ResetView(); break;
             case Key.Add: case Key.OemPlus: Zoom(.8); break;
             case Key.Subtract: case Key.OemMinus: Zoom(1.25); break;
-            case Key.Left: _viewport = VisibleRange.Pan(-VisibleRange.Seconds * .2, ChartSeries.Extent(_samples)); ChangedView(); break;
-            case Key.Right: _viewport = VisibleRange.Pan(VisibleRange.Seconds * .2, ChartSeries.Extent(_samples)); ChangedView(); break;
+            case Key.Left: Pan(-VisibleRange.Seconds * .2); break;
+            case Key.Right: Pan(VisibleRange.Seconds * .2); break;
+            case Key.End: FollowLive(); break;
             default: return;
         }
         e.Handled = true;

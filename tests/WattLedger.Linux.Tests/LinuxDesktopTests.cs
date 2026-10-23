@@ -1,3 +1,4 @@
+using WattLedger.Desktop;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -331,6 +332,13 @@ public sealed class LinuxDesktopTests
             await window.ReportRefreshTask;
             Assert.Equal(361, window.ChartSamples.Count);
             var controls = Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(window).ToArray();
+            var pan = Assert.Single(controls.OfType<Button>(), button => Equals(button.Content, "Pan ✓"));
+            var select = Assert.Single(controls.OfType<Button>(), button => Equals(button.Content, "Select"));
+            Assert.False(pan.IsEnabled);
+            select.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal("Select ✓", select.Content);
+            Assert.True(pan.IsEnabled);
+            Assert.False(select.IsEnabled);
             var from = Assert.Single(controls.OfType<TextBox>(), box => box.Name == "SelectionStart");
             var to = Assert.Single(controls.OfType<TextBox>(), box => box.Name == "SelectionEnd");
             var calculate = Assert.Single(controls.OfType<Button>(), button => Equals(button.Content, "Calculate"));

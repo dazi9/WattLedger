@@ -17,5 +17,9 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets/**/*.svg" />
+    <Compile Include="../WattLedger.Desktop/ChartSeries.cs" Link="Shared/ChartSeries.cs" />
+    <Compile Include="../WattLedger.Desktop/PowerChartLayout.cs" Link="Shared/PowerChartLayout.cs" />
+    <Compile Include="../WattLedger.Desktop/DashboardDataLoader.cs" Link="Shared/DashboardDataLoader.cs" />
+    <Compile Include="../WattLedger.Desktop/ReportRefreshGate.cs" Link="Shared/ReportRefreshGate.cs" />
   </ItemGroup>
 </Project>

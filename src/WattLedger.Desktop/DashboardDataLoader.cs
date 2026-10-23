@@ -2,7 +2,7 @@ using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
 using WattLedger.Core.Reporting;
 
-namespace WattLedger.Linux;
+namespace WattLedger.Desktop;
 
 internal sealed record DashboardSnapshot(DayReport Report, IReadOnlyList<PowerPoint> Samples);
 

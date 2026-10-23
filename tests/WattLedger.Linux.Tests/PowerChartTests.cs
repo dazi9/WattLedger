@@ -1,3 +1,4 @@
+using WattLedger.Desktop;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -364,6 +365,7 @@ public sealed class PowerChartTests
             window.MouseWheel(At(.25), new Vector(0, 1));
             Assert.Equal(96, chart.VisibleRange.Seconds, 5);
             Assert.Equal(first.AddSeconds(30), chart.VisibleRange.Start.AddSeconds(chart.VisibleRange.Seconds * .25));
+            chart.InteractionMode = ChartInteractionMode.Select;
             window.MouseDown(At(.25), MouseButton.Left);
             window.MouseMove(At(.75));
             window.MouseUp(At(.75), MouseButton.Left);
@@ -385,7 +387,7 @@ public sealed class PowerChartTests
     public void Clicking_an_empty_gap_view_does_not_select_offscreen_samples()
     {
         var first = DateTimeOffset.Now;
-        var chart = new PowerChart { Samples = [new(first, 4), new(first.AddHours(1), 6)] };
+        var chart = new PowerChart { InteractionMode = ChartInteractionMode.Select, Samples = [new(first, 4), new(first.AddHours(1), 6)] };
         var window = new Window { Width = 600, Height = 220, Content = chart };
         try
         {
@@ -406,4 +408,91 @@ public sealed class PowerChartTests
         }
         finally { window.Close(); }
     }
+
+    [AvaloniaFact]
+    public void Default_left_drag_and_horizontal_scroll_pan_without_zooming_first()
+    {
+        var first = new DateTimeOffset(2026, 10, 24, 8, 0, 0, TimeSpan.Zero);
+        var samples = Enumerable.Range(0, 721).Select(i => new PowerPoint(first.AddSeconds(i * 5), 12, 50)).ToArray();
+        var chart = new PowerChart { Samples = samples };
+        var window = new Window { Width = 600, Height = 220, Content = chart };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var origin = chart.TranslatePoint(default, window)!.Value;
+            var layout = PowerChartLayout.Calculate(chart.Samples, chart.Bounds.Width, chart.Bounds.Height, viewport: chart.VisibleRange);
+            Point At(double fraction) => new(origin.X + layout.PlotLeft + (layout.PlotRight - layout.PlotLeft) * fraction, origin.Y + layout.PlotTop + 30);
+            Assert.Equal(ChartInteractionMode.Pan, chart.InteractionMode);
+            Assert.True(chart.IsFollowingLive);
+            Assert.Equal(first.AddMinutes(30), chart.VisibleRange.Start);
+            Assert.True(chart.CanPanEarlier);
+            Assert.False(chart.CanPanLater);
+
+            window.MouseDown(At(.5), MouseButton.Left);
+            window.MouseMove(At(.7));
+            window.MouseUp(At(.7), MouseButton.Left);
+            Assert.InRange((chart.VisibleRange.Start - first.AddMinutes(24)).TotalMilliseconds, -1, 1);
+            Assert.Equal(1800, chart.VisibleRange.Seconds, 5);
+            Assert.Null(chart.Selection);
+            Assert.False(chart.IsFollowingLive);
+            Assert.True(chart.CanPanLater);
+
+            var beforeWheel = chart.VisibleRange;
+            window.MouseWheel(At(.5), new Vector(1, .05));
+            Assert.InRange((beforeWheel.Start - chart.VisibleRange.Start).TotalSeconds, 179.999, 180.001);
+            Assert.Equal(beforeWheel.Seconds, chart.VisibleRange.Seconds, 5);
+
+            var paused = chart.VisibleRange;
+            chart.Samples = [.. samples, new(first.AddMinutes(61), 14, 49)];
+            Assert.Equal(paused, chart.VisibleRange);
+            chart.FollowLive();
+            Assert.True(chart.IsFollowingLive);
+            Assert.Equal(first.AddMinutes(61), chart.VisibleRange.End);
+            Assert.Equal(1800, chart.VisibleRange.Seconds, 5);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Follow_grows_short_history_then_preserves_zoom_width_and_reset_exposes_boundaries()
+    {
+        var first = new DateTimeOffset(2026, 10, 24, 8, 0, 0, TimeSpan.Zero);
+        var chart = new PowerChart { Samples = [new(first, 4), new(first.AddMinutes(1), 6)] };
+        Assert.Equal(60, chart.VisibleRange.Seconds);
+        chart.Samples = [new(first, 4), new(first.AddMinutes(20), 6)];
+        Assert.Equal(1200, chart.VisibleRange.Seconds);
+        chart.Samples = [new(first, 4), new(first.AddHours(2), 6)];
+        Assert.Equal(1800, chart.VisibleRange.Seconds);
+        Assert.Equal(first.AddHours(2), chart.VisibleRange.End);
+        chart.Zoom(.5);
+        Assert.False(chart.IsFollowingLive);
+        chart.FollowLive();
+        Assert.Equal(900, chart.VisibleRange.Seconds);
+        chart.Samples = [new(first, 4), new(first.AddHours(3), 6)];
+        Assert.Equal(900, chart.VisibleRange.Seconds);
+        Assert.Equal(first.AddHours(3), chart.VisibleRange.End);
+
+        chart.Pan(-100_000);
+        Assert.False(chart.CanPanEarlier);
+        Assert.True(chart.CanPanLater);
+        chart.ResetView();
+        Assert.False(chart.IsFollowingLive);
+        Assert.Equal(10800, chart.VisibleRange.Seconds);
+        Assert.False(chart.CanPanEarlier);
+        Assert.False(chart.CanPanLater);
+        var fitSnapshot = chart.VisibleRange;
+        chart.Samples = [new(first, 4), new(first.AddHours(3).AddMinutes(1), 6)];
+        Assert.Equal(fitSnapshot, chart.VisibleRange);
+        Assert.True(chart.CanPanLater);
+        chart.ResetView();
+        chart.FollowLive();
+        Assert.Equal(1800, chart.VisibleRange.Seconds);
+
+        chart.Pan(-500);
+        chart.Samples = [new(first.AddDays(1), 4), new(first.AddDays(1).AddHours(1), 6)];
+        Assert.True(chart.IsFollowingLive);
+        Assert.Equal(first.AddDays(1).AddMinutes(30), chart.VisibleRange.Start);
+    }
+
 }
