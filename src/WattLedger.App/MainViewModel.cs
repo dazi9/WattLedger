@@ -6,6 +6,7 @@ using System.Windows.Media;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
 using WattLedger.Core.Reporting;
+using WattLedger.Desktop;
 
 namespace WattLedger.App;
 
@@ -18,6 +19,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private static Brush RedBrush => ThemeBrush("RedBrush");
 
     private readonly WattLedgerService _service;
+    private readonly DashboardDataLoader _dataLoader;
     private string _powerText = "—";
     private string _powerDetailText = "Waiting for the first sample";
     private string _batteryText = "—";
@@ -30,12 +32,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _statusText = "Collecting the first sample…";
     private Brush _powerBrush = GreenBrush;
     private Brush _stateBrush = BlueBrush;
-    private IReadOnlyList<ChartSample> _chartSamples = Array.Empty<ChartSample>();
+    private IReadOnlyList<PowerPoint> _chartSamples = Array.Empty<PowerPoint>();
     private string? _startupError;
 
     public MainViewModel(WattLedgerService service)
     {
         _service = service;
+        _dataLoader = new DashboardDataLoader(service);
         _service.Error += (_, message) =>
         {
             var dispatcher = Application.Current?.Dispatcher;
@@ -127,7 +130,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set => Set(ref _stateBrush, value);
     }
 
-    public IReadOnlyList<ChartSample> ChartSamples
+    internal IReadOnlyList<PowerPoint> ChartSamples
     {
         get => _chartSamples;
         private set => Set(ref _chartSamples, value);
@@ -155,11 +158,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
         StatusText = $"Not recording: {message}";
     }
 
-    public void RefreshReport()
+    public async Task RefreshReportAsync()
     {
         try
         {
-            var report = _service.GetTodayReport();
+            var snapshot = await Task.Run(() => _dataLoader.Load(DateTimeOffset.Now));
+            var report = snapshot.Report;
             TodayEnergyText = $"{report.DischargeWh:0.0} Wh";
             TodayDetailText = $"active {ReportBuilder.FormatDuration(report.ActiveSeconds)} · standby {ReportBuilder.FormatDuration(report.StandbySeconds)}";
 
@@ -179,20 +183,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
                     $"{session.AverageWatts:0.0} W"));
             }
 
-            var now = DateTimeOffset.Now;
-            var todayStart = new DateTimeOffset(DateTime.Today);
-            ChartSamples = _service.GetSamples(todayStart, now, 240)
-                .Select(s => new ChartSample(
-                    s.Timestamp,
-                    Math.Max(0, s.NetDischargeWatts ?? 0),
-                    s.BatteryPercent))
-                .ToArray();
+            ChartSamples = snapshot.Samples;
 
             if (_startupError is null)
             {
-                StatusText = _service.Latest is { } latest
-                    ? $"Recording locally · last sample {latest.Timestamp.ToLocalTime():HH:mm:ss}"
-                    : "Waiting for the first sample…";
+                if (_service.Latest is { } latest) ApplyStatus(latest);
+                else StatusText = "Waiting for the first sample…";
             }
             ChartUpdated?.Invoke(this, EventArgs.Empty);
         }
@@ -202,17 +198,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public void RefreshAll()
-    {
-        RefreshLive();
-        RefreshReport();
-    }
+    public void InvalidateReport() => _dataLoader.Invalidate();
 
     private void ApplyStatus(LedgerStatus status)
     {
         var battery = status.Battery;
         var discharge = battery.DischargeWatts
-                        ?? (battery.IsDischarging ? status.RecentAverageWatts : null);
+                        ?? (battery.IsDischarging && status.RecentAverageWatts is > 0 ? status.RecentAverageWatts : null);
         var charge = battery.ChargeWatts
                      ?? (battery.IsCharging && status.RecentAverageWatts is < 0 ? -status.RecentAverageWatts : null);
         var powerEstimated = (battery.IsDischarging && battery.DischargeWatts is null && discharge is not null) ||
@@ -220,17 +212,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         if (battery.IsDischarging && discharge is { } dischargeWatts)
         {
-            PowerText = $"-{dischargeWatts:0.0} W";
+            PowerText = $"+{dischargeWatts:0.0} W";
             PowerBrush = GreenBrush;
         }
         else if (battery.IsCharging && charge is { } chargeWattsValue)
         {
-            PowerText = $"+{chargeWattsValue:0.0} W";
+            PowerText = $"-{chargeWattsValue:0.0} W";
             PowerBrush = BlueBrush;
         }
         else
         {
-            PowerText = "0.0 W";
+            PowerText = "—";
             PowerBrush = MutedBrush;
         }
 
@@ -246,6 +238,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         BatteryText = FormatPercent(battery.Percent);
 
         var health = battery.HealthPercent is { } h ? $"{h:0.0}% health" : "health unknown";
+        if (battery.PercentIsEstimated) health += " · estimated";
         var cycles = battery.CycleCount is { } c ? $" · {c} cycles" : "";
         BatteryDetailText = battery.RemainingCapacityMwh is { } remaining && battery.FullChargeCapacityMwh is { } full
             ? $"{remaining / 1000.0:0.0} / {full / 1000.0:0.0} Wh · {health}{cycles}"
@@ -266,7 +259,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             var hoursToFull = (fullCharge - remainingCharge) / 1000.0 / chargeWatts;
             TimeLeftText = $"{Math.Max(0, hoursToFull):0.0} h";
-            TimeLeftDetailText = $"to full · charging at {chargeWatts:0.0} W";
+            TimeLeftDetailText = $"estimated to full · charging at {chargeWatts:0.0} W";
         }
         else
         {
@@ -274,16 +267,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
             TimeLeftDetailText = battery.IsAcOnline ? "plugged in" : "waiting for power data";
         }
 
-        if (battery.IsAcOnline)
-        {
-            StateText = battery.IsCharging ? "CHARGING" : "AC POWER";
-            StateBrush = battery.IsCharging ? OrangeBrush : BlueBrush;
-        }
-        else
-        {
-            StateText = "ON BATTERY";
-            StateBrush = GreenBrush;
-        }
+        StateText = battery.BatteryCount == 0 ? "NO BATTERY"
+            : battery.IsCharging ? "CHARGING"
+            : battery.IsDischarging ? "ON BATTERY"
+            : battery.IsAcOnline ? "AC POWER" : "STATE UNKNOWN";
+        StateBrush = battery.IsCharging || battery.IsAcOnline ? BlueBrush
+            : battery.IsDischarging ? GreenBrush : MutedBrush;
+        StatusText = battery.IsCharging || battery.IsDischarging || battery.IsAcOnline
+            ? $"Recording locally · last sample {status.Timestamp.ToLocalTime():HH:mm:ss}"
+            : $"State unavailable · session tracking paused · last reading {status.Timestamp.ToLocalTime():HH:mm:ss}";
 
         if (status.BrightnessPercent is { } brightness)
         {
@@ -333,7 +325,3 @@ public sealed record SessionRow(
     string Energy,
     string Average);
 
-public sealed record ChartSample(
-    DateTimeOffset Timestamp,
-    double PowerWatts,
-    int? BatteryPercent);

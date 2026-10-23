@@ -1,17 +1,17 @@
 using DesktopThemeMode = WattLedger.Desktop.ThemeMode;
-using WattLedger.Desktop;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Windows.Shapes;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Reporting;
+using WattLedger.Desktop;
 
 namespace WattLedger.App;
 
@@ -23,6 +23,10 @@ public partial class MainWindow : Window
     private DispatcherTimer? _reportTimer;
     private bool _loaded;
     private bool _allowClose;
+    private bool _stopping;
+    private Task _refreshTask = Task.CompletedTask;
+    private Task _exportTask = Task.CompletedTask;
+    private bool CanRefresh => !_stopping && IsVisible && WindowState != WindowState.Minimized;
 
     public MainWindow(WattLedgerService service)
     {
@@ -40,7 +44,7 @@ public partial class MainWindow : Window
 
         var workArea = SystemParameters.WorkArea;
         Width = Math.Min(1120, Math.Max(960, workArea.Width - 40));
-        Height = Math.Min(800, Math.Max(640, workArea.Height - 40));
+        Height = Math.Min(1000, Math.Max(640, workArea.Height - 40));
 
         using (var icon = TrayIconFactory.Create())
         {
@@ -50,7 +54,11 @@ public partial class MainWindow : Window
                 BitmapSizeOptions.FromEmptyOptions());
         }
 
-        _viewModel.ChartUpdated += (_, _) => DrawChart();
+        _viewModel.ChartUpdated += (_, _) => { Chart.Samples = _viewModel.ChartSamples; };
+        Chart.SelectionChanged += (_, _) => UpdateSelectionSummary();
+        Chart.ViewChanged += (_, _) => UpdateChartRange();
+        IsVisibleChanged += (_, _) => RefreshIfVisible();
+        StateChanged += (_, _) => RefreshIfVisible();
         Loaded += OnLoaded;
         Closing += OnClosing;
     }
@@ -112,6 +120,7 @@ public partial class MainWindow : Window
         Topmost = true;
         Topmost = false;
         Focus();
+        RefreshIfVisible();
     }
 
     public void HideToTray() => Hide();
@@ -126,14 +135,14 @@ public partial class MainWindow : Window
         }
 
         _loaded = true;
-        _viewModel.RefreshAll();
+        RefreshIfVisible();
 
         _liveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        _liveTimer.Tick += (_, _) => _viewModel.RefreshLive();
+        _liveTimer.Tick += (_, _) => { if (CanRefresh) _viewModel.RefreshLive(); };
         _liveTimer.Start();
 
         _reportTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
-        _reportTimer.Tick += (_, _) => _viewModel.RefreshReport();
+        _reportTimer.Tick += (_, _) => RefreshIfVisible();
         _reportTimer.Start();
 
         UpdateAutostartButton();
@@ -155,56 +164,63 @@ public partial class MainWindow : Window
 
     private void Hide_Click(object sender, RoutedEventArgs e) => Hide();
 
-    private void ChartCanvas_SizeChanged(object sender, SizeChangedEventArgs e) => DrawChart();
-
-    private void ExportCsv_Click(object sender, RoutedEventArgs e)
+    private void RefreshIfVisible()
     {
-        var dialog = new SaveFileDialog
-        {
-            Filter = "CSV (*.csv)|*.csv",
-            FileName = $"wattledger-{DateTime.Now:yyyy-MM-dd}.csv"
-        };
-
-        if (dialog.ShowDialog(this) != true)
-        {
-            return;
-        }
-
-        try
-        {
-            var start = new DateTimeOffset(DateTime.Today);
-            var end = start.AddDays(1);
-            var samples = _service.GetSamples(start, end);
-            ReportBuilder.ExportCsv(samples, dialog.FileName);
-            MessageBox.Show(this, $"Exported {samples.Count:N0} samples to:\n{dialog.FileName}", "WattLedger", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Export failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+        if (!_loaded || !CanRefresh) return;
+        _viewModel.RefreshLive();
+        if (_refreshTask.IsCompleted) _refreshTask = _viewModel.RefreshReportAsync();
     }
 
-    private void ExportReport_Click(object sender, RoutedEventArgs e)
+    public void InvalidateReport()
     {
+        _viewModel.InvalidateReport();
+        if (!Dispatcher.CheckAccess()) Dispatcher.BeginInvoke(RefreshIfVisible);
+        else RefreshIfVisible();
+    }
+
+    public async Task StopBackgroundWorkAsync()
+    {
+        _stopping = true;
+        _liveTimer?.Stop();
+        _reportTimer?.Stop();
+        try { await Task.WhenAll(_refreshTask, _exportTask); }
+        catch { /* Export/report handlers already surface operation failures. */ }
+    }
+
+    private async void ExportCsv_Click(object sender, RoutedEventArgs e) => await ExportAsync("csv");
+    private async void ExportReport_Click(object sender, RoutedEventArgs e) => await ExportAsync("md");
+    private async void ExportJson_Click(object sender, RoutedEventArgs e) => await ExportAsync("json");
+
+    private async Task ExportAsync(string format)
+    {
+        if (!_exportTask.IsCompleted || _stopping) return;
         var dialog = new SaveFileDialog
         {
-            Filter = "Markdown (*.md)|*.md",
-            FileName = $"wattledger-{DateTime.Now:yyyy-MM-dd}.md"
+            Filter = format switch { "csv" => "CSV (*.csv)|*.csv", "json" => "JSON (*.json)|*.json", _ => "Markdown (*.md)|*.md" },
+            FileName = $"wattledger-{DateTime.Now:yyyy-MM-dd}.{format}"
         };
-
-        if (dialog.ShowDialog(this) != true)
-        {
-            return;
-        }
-
+        if (dialog.ShowDialog(this) != true) return;
         try
         {
-            ReportBuilder.ExportMarkdown(_service.GetTodayReport(), dialog.FileName);
-            MessageBox.Show(this, $"Report written to:\n{dialog.FileName}", "WattLedger", MessageBoxButton.OK, MessageBoxImage.Information);
+            var date = DateOnly.FromDateTime(DateTime.Today);
+            var end = DateTimeOffset.Now;
+            var path = dialog.FileName;
+            _exportTask = Task.Run(() =>
+            {
+                if (format == "csv")
+                {
+                    var start = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local));
+                    ReportBuilder.ExportCsv(_service.GetSamples(start, end), path);
+                }
+                else if (format == "json") ReportBuilder.ExportJson(_service.GetReport(date), path);
+                else ReportBuilder.ExportMarkdown(_service.GetReport(date), path);
+            });
+            await _exportTask;
+            if (!_stopping) MessageBox.Show(this, $"Exported to:\n{path}", "WattLedger", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Export failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (!_stopping) MessageBox.Show(this, ex.Message, "Export failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -243,142 +259,75 @@ public partial class MainWindow : Window
             : "Start with Windows: Off";
     }
 
-    private void DrawChart()
-    {
-        ChartCanvas.Children.Clear();
+    private void DrawChart() => Chart.InvalidateTheme();
 
-        var width = ChartCanvas.ActualWidth;
-        var height = ChartCanvas.ActualHeight;
-        if (width < 80 || height < 80)
+    private void PanMode_Click(object sender, RoutedEventArgs e) => SetChartMode(ChartInteractionMode.Pan);
+    private void SelectMode_Click(object sender, RoutedEventArgs e) => SetChartMode(ChartInteractionMode.Select);
+    private void SetChartMode(ChartInteractionMode mode)
+    {
+        Chart.InteractionMode = mode;
+        Chart.Cursor = mode == ChartInteractionMode.Pan ? System.Windows.Input.Cursors.Hand : System.Windows.Input.Cursors.Cross;
+        PanModeButton.Content = mode == ChartInteractionMode.Pan ? "Pan ✓" : "Pan";
+        SelectModeButton.Content = mode == ChartInteractionMode.Select ? "Select points ✓" : "Select points";
+    }
+    private void Earlier_Click(object sender, RoutedEventArgs e) => Chart.Pan(-Chart.VisibleRange.Seconds * .2);
+    private void Later_Click(object sender, RoutedEventArgs e) => Chart.Pan(Chart.VisibleRange.Seconds * .2);
+    private void ZoomIn_Click(object sender, RoutedEventArgs e) => Chart.Zoom(.8);
+    private void ZoomOut_Click(object sender, RoutedEventArgs e) => Chart.Zoom(1.25);
+    private void ResetChart_Click(object sender, RoutedEventArgs e) => Chart.ResetView();
+    private void FollowLive_Click(object sender, RoutedEventArgs e) => Chart.FollowLive();
+    private void FitSelection_Click(object sender, RoutedEventArgs e) => Chart.ZoomToSelection();
+    private void ClearSelection_Click(object sender, RoutedEventArgs e) => Chart.ClearSelection();
+    private void UpdateChartRange()
+    {
+        var range = Chart.VisibleRange;
+        ChartRange.Text = Chart.Samples.Count == 0 ? "No recorded samples today" :
+            $"{range.Start.ToLocalTime():HH:mm:ss} – {range.End.ToLocalTime():HH:mm:ss} · {Chart.Samples.Count:N0} original samples · " +
+            (Chart.IsFollowingLive ? "following live" : "paused view");
+        EarlierButton.IsEnabled = Chart.CanPanEarlier;
+        LaterButton.IsEnabled = Chart.CanPanLater;
+        FollowButton.Content = Chart.IsFollowingLive ? "Following live ✓" : "Follow live";
+    }
+    private void UpdateSelectionSummary()
+    {
+        if (Chart.Selection is not { } stats)
         {
+            SelectionStart.Text = SelectionEnd.Text = "";
+            SelectionSummary.Text = "Choose Select points and drag, or enter two times to calculate a range.";
             return;
         }
-
-        var samples = _viewModel.ChartSamples;
-        if (samples.Count < 2)
+        if (!SelectionStart.IsKeyboardFocused && !SelectionEnd.IsKeyboardFocused)
         {
-            AddText("Collecting samples…", 12, 12, 12, FindBrush("MutedBrush"));
+            SelectionStart.Text = stats.Start.ToLocalTime().ToString("HH:mm:ss");
+            SelectionEnd.Text = stats.End.ToLocalTime().ToString("HH:mm:ss");
+        }
+        var energy = stats.CoveredSeconds > 0
+            ? $"net {stats.NetEnergyWh:+0.000;-0.000;0.000} Wh · used {stats.DischargeEnergyWh:0.000} Wh · charged {stats.ChargeEnergyWh:0.000} Wh · avg {stats.AverageWatts:0.00} W"
+            : "No continuous power readings in this range";
+        SelectionSummary.Text = $"{stats.SampleCount:N0} points · {ReportBuilder.FormatDuration(stats.DurationSeconds)} · {energy}\n" +
+            $"Coverage {stats.Coverage:P1} ({ReportBuilder.FormatDuration(stats.CoveredSeconds)})" +
+            (stats.Coverage < 1 ? " · partial" : "") +
+            (stats.MinimumWatts is { } min && stats.MaximumWatts is { } max ? $" · min {min:0.00} / max {max:0.00} W" : "");
+    }
+    private void CalculateSelection_Click(object sender, RoutedEventArgs e)
+    {
+        string[] formats = ["H:mm", "HH:mm", "H:mm:ss", "HH:mm:ss"];
+        if (!TimeOnly.TryParseExact(SelectionStart.Text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var start) ||
+            !TimeOnly.TryParseExact(SelectionEnd.Text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var end) || end <= start)
+        {
+            SelectionSummary.Text = "Enter two times as HH:mm or HH:mm:ss, with the end after the start.";
             return;
         }
-
-        const double left = 46;
-        const double right = 44;
-        const double top = 10;
-        const double bottom = 26;
-        var plotWidth = Math.Max(10, width - left - right);
-        var plotHeight = Math.Max(10, height - top - bottom);
-
-        var start = samples[0].Timestamp;
-        var end = samples[^1].Timestamp;
-        var totalSeconds = Math.Max(1, (end - start).TotalSeconds);
-
-        var maxPower = Math.Max(5, samples.Max(s => s.PowerWatts) * 1.15);
-        maxPower = Math.Ceiling(maxPower / 5) * 5;
-
-        var gridBrush = FindBrush("BorderBrush");
-        var mutedBrush = FindBrush("MutedBrush");
-        var greenBrush = FindBrush("GreenBrush");
-        var blueBrush = FindBrush("BlueBrush");
-
-        for (var i = 0; i <= 5; i++)
+        var date = Chart.Samples.Count > 0 ? DateOnly.FromDateTime(Chart.Samples[0].Timestamp.LocalDateTime) : DateOnly.FromDateTime(DateTime.Today);
+        var from = new DateTimeOffset(date.ToDateTime(start, DateTimeKind.Local));
+        var to = new DateTimeOffset(date.ToDateTime(end, DateTimeKind.Local));
+        if (Chart.Samples.Count == 0 || to < Chart.Samples[0].Timestamp || from > Chart.Samples[^1].Timestamp)
         {
-            var y = top + plotHeight * i / 5;
-            ChartCanvas.Children.Add(new Line
-            {
-                X1 = left,
-                Y1 = y,
-                X2 = left + plotWidth,
-                Y2 = y,
-                Stroke = gridBrush,
-                StrokeThickness = 1,
-                Opacity = i is 0 or 5 ? 0.8 : 0.45
-            });
-
-            var powerLabel = maxPower * (1 - i / 5.0);
-            AddText($"{powerLabel:0} W", 2, y - 7, 10, mutedBrush);
-
-            var batteryLabel = 100 - i * 20;
-            AddText($"{batteryLabel}%", left + plotWidth + 8, y - 7, 10, mutedBrush);
+            SelectionSummary.Text = "Choose a range that overlaps today's recorded samples.";
+            return;
         }
-
-        var powerPoints = new PointCollection();
-        var batteryPoints = new PointCollection();
-        var batteryAvailable = false;
-
-        foreach (var sample in samples)
-        {
-            var x = left + (sample.Timestamp - start).TotalSeconds / totalSeconds * plotWidth;
-            var powerY = top + plotHeight - Math.Clamp(sample.PowerWatts / maxPower, 0, 1) * plotHeight;
-            powerPoints.Add(new Point(x, powerY));
-
-            if (sample.BatteryPercent is { } percent)
-            {
-                batteryAvailable = true;
-                var batteryY = top + plotHeight - Math.Clamp(percent / 100.0, 0, 1) * plotHeight;
-                batteryPoints.Add(new Point(x, batteryY));
-            }
-        }
-
-        if (powerPoints.Count >= 2)
-        {
-            var areaPoints = new PointCollection(powerPoints);
-            areaPoints.Add(new Point(left + plotWidth, top + plotHeight));
-            areaPoints.Add(new Point(left, top + plotHeight));
-
-            ChartCanvas.Children.Add(new Polygon
-            {
-                Points = areaPoints,
-                Fill = new LinearGradientBrush(
-                    (Color)FindResource("ChartAreaTopColor"),
-                    (Color)FindResource("ChartAreaBottomColor"),
-                    new Point(0, 0),
-                    new Point(0, 1)),
-                StrokeThickness = 0
-            });
-
-            ChartCanvas.Children.Add(new Polyline
-            {
-                Points = powerPoints,
-                Stroke = greenBrush,
-                StrokeThickness = 2,
-                StrokeLineJoin = PenLineJoin.Round,
-                StrokeStartLineCap = PenLineCap.Round,
-                StrokeEndLineCap = PenLineCap.Round
-            });
-        }
-
-        if (batteryAvailable && batteryPoints.Count >= 2)
-        {
-            ChartCanvas.Children.Add(new Polyline
-            {
-                Points = batteryPoints,
-                Stroke = blueBrush,
-                StrokeThickness = 1.5,
-                StrokeDashArray = new DoubleCollection { 4, 4 },
-                StrokeDashCap = PenLineCap.Round
-            });
-        }
-
-        AddText(start.ToLocalTime().ToString("HH:mm"), left, top + plotHeight + 6, 10, mutedBrush);
-        AddText(end.ToLocalTime().ToString("HH:mm"), left + plotWidth - 34, top + plotHeight + 6, 10, mutedBrush);
+        Chart.SelectRange(from, to);
     }
-
-    private void AddText(string text, double x, double y, double fontSize, Brush brush)
-    {
-        var block = new TextBlock
-        {
-            Text = text,
-            FontSize = fontSize,
-            Foreground = brush,
-            FontFamily = new FontFamily("Segoe UI")
-        };
-        Canvas.SetLeft(block, x);
-        Canvas.SetTop(block, y);
-        ChartCanvas.Children.Add(block);
-    }
-
-    private Brush FindBrush(string key) =>
-        TryFindResource(key) as Brush ?? Brushes.Gray;
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);

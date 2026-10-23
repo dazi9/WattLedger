@@ -84,9 +84,12 @@ public partial class App : Application
         _window?.ShowFromTray();
     }
 
-    public void ExitApplication()
+    public async void ExitApplication()
     {
+        if (_exiting) return;
         _exiting = true;
+        // Finish database readers before disposing the shared service on shutdown.
+        if (_window is not null) await _window.StopBackgroundWorkAsync();
         _window?.AllowClose();
         _window?.Close();
         Shutdown();
@@ -132,9 +135,10 @@ public partial class App : Application
             var battery = status.Battery;
             _tray.ToolTipText = battery switch
             {
-                { IsDischarging: true, DischargeWatts: { } watts } => $"-{watts:0.0} W · {battery.Percent}% · WattLedger",
-                { IsCharging: true, ChargeWatts: { } watts } => $"+{watts:0.0} W · {battery.Percent}% · WattLedger",
-                _ => $"AC · {battery.Percent}% · WattLedger"
+                { IsDischarging: true, DischargeWatts: { } watts } => $"+{watts:0.0} W · {battery.Percent}% · WattLedger",
+                { IsCharging: true, ChargeWatts: { } watts } => $"-{watts:0.0} W · {battery.Percent}% · WattLedger",
+                { IsAcOnline: true } => $"AC · {battery.Percent}% · WattLedger",
+                _ => $"Power unavailable · {battery.Percent}% · WattLedger"
             };
         });
     }
@@ -148,6 +152,7 @@ public partial class App : Application
                 break;
             case PowerModes.Resume:
                 _service?.NotifyResume();
+                _window?.InvalidateReport();
                 break;
         }
     }

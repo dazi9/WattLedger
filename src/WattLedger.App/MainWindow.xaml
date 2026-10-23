@@ -1,6 +1,7 @@
 <Window x:Class="WattLedger.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:WattLedger.App"
         Title="WattLedger"
         Height="800"
         Width="1120"
@@ -11,12 +12,13 @@
         Foreground="{DynamicResource TextBrush}"
         FontFamily="Segoe UI Variable Text, Segoe UI"
         TextOptions.TextFormattingMode="Display">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <Grid Margin="28">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="3*" />
-            <RowDefinition Height="2*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
@@ -79,29 +81,34 @@
         </UniformGrid>
 
         <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,12,0,0">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-
-                <Grid>
-                    <TextBlock Text="Power &amp; battery · today" Style="{StaticResource SectionTitle}" />
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <Rectangle Width="18" Height="2" Fill="{DynamicResource GreenBrush}" Margin="0,0,6,0" />
-                        <TextBlock Text="Power" Style="{StaticResource SubtleText}" Margin="0,0,16,0" />
-                        <Rectangle Width="18" Height="2" Fill="{DynamicResource BlueBrush}" Margin="0,0,6,0" />
-                        <TextBlock Text="Battery" Style="{StaticResource SubtleText}" />
-                    </StackPanel>
-                </Grid>
-
-                <Canvas x:Name="ChartCanvas"
-                        Grid.Row="1"
-                        Height="210"
-                        Margin="0,8,0,0"
-                        ClipToBounds="True"
-                        SizeChanged="ChartCanvas_SizeChanged" />
-            </Grid>
+            <StackPanel>
+                <TextBlock Text="Power &amp; battery · today" Style="{StaticResource SectionTitle}" />
+                <TextBlock Text="Power: + discharge / − charging · blue dashed line: battery %" Style="{StaticResource SubtleText}" Margin="0,4,0,6" />
+                <WrapPanel>
+                    <Button x:Name="PanModeButton" Content="Pan ✓" Click="PanMode_Click" />
+                    <Button x:Name="SelectModeButton" Content="Select points" Click="SelectMode_Click" />
+                    <Button x:Name="EarlierButton" Content="← Earlier" Click="Earlier_Click" />
+                    <Button x:Name="LaterButton" Content="Later →" Click="Later_Click" />
+                    <Button Content="+" ToolTip="Zoom in" Click="ZoomIn_Click" />
+                    <Button Content="−" ToolTip="Zoom out" Click="ZoomOut_Click" />
+                    <Button Content="Fit today" Click="ResetChart_Click" />
+                    <Button x:Name="FollowButton" Content="Following live" Click="FollowLive_Click" />
+                    <Button Content="Fit selection" Click="FitSelection_Click" />
+                    <Button Content="Clear selection" Click="ClearSelection_Click" />
+                </WrapPanel>
+                <TextBlock x:Name="ChartRange" Style="{StaticResource SubtleText}" Margin="0,6,0,0" />
+                <local:PowerChart x:Name="Chart" Height="210" Margin="0,4,0,0" />
+                <TextBlock Text="Drag to pan · Select points to measure · wheel to zoom · horizontal scroll / arrow keys to pan" Style="{StaticResource SubtleText}" TextWrapping="Wrap" />
+                <WrapPanel Margin="0,8,0,0">
+                    <TextBlock Text="From" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBox x:Name="SelectionStart" Width="85" Padding="6,4" Margin="0,0,12,0" ToolTip="Selection start: HH:mm:ss" AutomationProperties.Name="Selection start time" />
+                    <TextBlock Text="To" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBox x:Name="SelectionEnd" Width="85" Padding="6,4" Margin="0,0,12,0" ToolTip="Selection end: HH:mm:ss" AutomationProperties.Name="Selection end time" />
+                    <Button Content="Calculate" Click="CalculateSelection_Click" />
+                </WrapPanel>
+                <TextBlock x:Name="SelectionSummary" Text="Choose Select points and drag, or enter two times to calculate a range."
+                           Style="{StaticResource SubtleText}" TextWrapping="Wrap" Margin="0,6,0,0" />
+            </StackPanel>
         </Border>
 
         <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,12,0,0">
@@ -119,7 +126,7 @@
                                Style="{StaticResource SubtleText}" />
                 </Grid>
 
-                <DataGrid x:Name="SessionsGrid"
+                <DataGrid x:Name="SessionsGrid" Height="190"
                           Grid.Row="1"
                           Margin="0,8,0,0"
                           ItemsSource="{Binding Sessions}">
@@ -141,6 +148,7 @@
             <StackPanel Orientation="Horizontal">
                 <Button Content="Export CSV" Click="ExportCsv_Click" />
                 <Button Content="Export report" Click="ExportReport_Click" />
+                <Button Content="Export JSON" Click="ExportJson_Click" />
                 <Button Content="Open data folder" Click="OpenData_Click" />
             </StackPanel>
 
@@ -155,4 +163,5 @@
             </StackPanel>
         </Grid>
     </Grid>
+    </ScrollViewer>
 </Window>
