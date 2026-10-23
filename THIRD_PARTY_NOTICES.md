@@ -8,7 +8,8 @@ WattLedger is MIT-licensed. It depends on the following open-source packages. Th
 | Spectre.Console | MIT | CLI rendering |
 | Hardcodet.NotifyIcon.Wpf | MIT | System tray icon |
 | Avalonia | MIT | Linux desktop UI |
-| Avalonia.Desktop / Avalonia.Skia | MIT | Linux desktop host and rendering |
+| Avalonia.Desktop / Avalonia.Skia / Avalonia.HarfBuzz | MIT | Linux desktop host, rendering, and text shaping |
+| Avalonia.Wayland / NWayland | MIT | Native Wayland desktop protocol integration |
 | Tmds.DBus.Protocol | MIT | Linux logind suspend/resume and desktop tray-host D-Bus integration |
 | System.Management | MIT | Optional WMI brightness query |
 | .NET / WPF | MIT | Runtime and desktop framework |

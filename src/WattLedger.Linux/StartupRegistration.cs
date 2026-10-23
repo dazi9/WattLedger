@@ -37,6 +37,7 @@ internal static class StartupRegistration
         var launchArguments = new List<string> { program };
         if (assemblyPath is not null) launchArguments.Add(assemblyPath);
         launchArguments.Add("--tray");
+        launchArguments.Add($"--backend={DesktopBackendOptions.StartupPreference.ToString().ToLowerInvariant()}");
         if (!string.IsNullOrWhiteSpace(databasePath))
         {
             launchArguments.Add("--db");

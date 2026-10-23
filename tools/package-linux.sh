@@ -85,7 +85,8 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: WattLedger contributors
-Depends: libc6, libgcc-s1, libstdc++6, zlib1g, libgtk-3-0 | libgtk-3-0t64, libx11-6, libx11-xcb1, libxi6, libxrender1, libxrandr2, libxcursor1, libxinerama1, libice6, libsm6, libfontconfig1, libfreetype6, libicu72 | libicu74 | libicu76, libssl3 | libssl3t64, xwayland
+Depends: libc6, libgcc-s1, libstdc++6, zlib1g, libgtk-3-0 | libgtk-3-0t64, libx11-6, libx11-xcb1, libxi6, libxrender1, libxrandr2, libxcursor1, libxinerama1, libice6, libsm6, libfontconfig1, libfreetype6, libwayland-client0, libwayland-cursor0, libwayland-egl1, libegl1, libgl1, libxkbcommon0, libicu72 | libicu74 | libicu76, libssl3 | libssl3t64
+Recommends: xwayland
 Description: Local-first laptop battery energy journal
  Records battery energy, sessions, and health locally through a desktop app and CLI.
 EOF

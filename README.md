@@ -36,7 +36,7 @@ WattLedger is deliberately narrow:
 - Windows 10 2004+ or Windows 11, x64; or Ubuntu 24.04 / Debian 12 or 13, x64, with GNOME.
 - [.NET 10 SDK](https://dotnet.microsoft.com/) to build from source.
 - A laptop battery with a supported Windows battery interface or Linux sysfs battery entries.
-- Linux desktop requires XWayland in a GNOME Wayland session. The tray icon is optional and needs a GNOME AppIndicator extension; without a tray host, keep the app window open.
+- Linux desktop supports native Wayland (experimental) and X11. Automatic selection prefers Wayland in a Wayland session; use `--backend=x11` for X11/XWayland compatibility. The tray icon is optional and needs a StatusNotifier/AppIndicator host; without a tray host, keep the app window open.
 - Basic battery readings do not require administrator rights or a kernel driver. Linux sensor availability depends on readable kernel sysfs interfaces.
 
 ## Quick start
@@ -75,7 +75,7 @@ dotnet run --project src/WattLedger.Cli -- status
 dotnet run --project src/WattLedger.Linux
 ```
 
-The Linux desktop supports `--db <path>` and `--tray`. By default it stores data under `$XDG_DATA_HOME/wattledger` (or `~/.local/share/wattledger`). For a self-contained x64 release:
+The Linux desktop supports `--db <path>`, `--tray`, and `--backend auto|wayland|x11`. `WATTLEDGER_BACKEND` supplies a default when the command-line option is omitted. See [Linux display backends](docs/linux-display-backends.md) for native-library requirements, fallback behavior, and current limitations. By default it stores data under `$XDG_DATA_HOME/wattledger` (or `~/.local/share/wattledger`). For a self-contained x64 release:
 
 ```sh
 dotnet publish src/WattLedger.Cli -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/cli-linux-x64
