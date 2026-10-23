@@ -199,7 +199,7 @@ public partial class MainWindow : Window
             Filter = format switch { "csv" => "CSV (*.csv)|*.csv", "json" => "JSON (*.json)|*.json", _ => "Markdown (*.md)|*.md" },
             FileName = $"wattledger-{DateTime.Now:yyyy-MM-dd}.{format}"
         };
-        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.ShowDialog(this) != true || _stopping) return;
         try
         {
             var date = DateOnly.FromDateTime(DateTime.Today);
