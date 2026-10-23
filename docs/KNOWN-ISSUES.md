@@ -9,6 +9,7 @@ Updated 2026-10-22. These items are deferred from the sampler and interactive-ch
 | Sparse-data hover | Hover inspects the nearest original point in the visible range, which can be some distance from the pointer around a sampling gap. Read the timestamp in the tooltip; gaps are excluded from integration. |
 | Live cards after a window-manager restore | Restoring a minimized window refreshes the chart/report immediately, but live cards can wait for the next sample (normally up to 30 seconds on AC). Opening through the tray applies the latest live reading immediately. Sampling and stored history continue throughout. |
 | History navigation | The interactive Linux chart currently covers today. Previous-day selection, multi-day comparison, and selection export are future UI work; the CLI and existing full-day exports remain available. |
+| Horizontal chart navigation | Users report that left/right navigation remains difficult or unavailable. Current panning requires zooming in first, then Shift + left-button drag or middle-button drag; plain dragging selects a range, and horizontal trackpad scrolling is not implemented. The reported usability/gesture issue remains open for the next iteration. |
 
 ## Validation still requiring hardware
 
