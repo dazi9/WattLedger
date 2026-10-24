@@ -21,7 +21,8 @@ public sealed class ThemeTests
         var first = new DateTimeOffset(2026, 10, 24, 10, 0, 0, TimeSpan.FromHours(8));
         var chart = new PowerChart
         {
-            Width = 480, Height = 200,
+            Width = 480,
+            Height = 200,
             Samples = [new(first, 5, 60), new(first.AddSeconds(30), -3, 61), new(first.AddSeconds(60), 8, 61)]
         };
         var background = ThemeResources.Brush("CardBrush");
