@@ -36,36 +36,6 @@ jobs:
       - name: Test Windows sampler startup (including tray lease conflicts)
         run: dotnet test tests/WattLedger.App.Tests/WattLedger.App.Tests.csproj -c Release --no-build
 
-      - name: Publish Windows CLI (self-contained, single file)
-        run: >
-          dotnet publish src/WattLedger.Cli/WattLedger.Cli.csproj
-          -c Release -r win-x64 --self-contained true
-          -p:PublishSingleFile=true
-          -p:IncludeNativeLibrariesForSelfExtract=true
-          -o artifacts/cli-win-x64
-
-      - name: Upload Windows CLI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wattledger-cli-win-x64
-          path: artifacts/cli-win-x64
-          if-no-files-found: error
-
-      - name: Publish Windows desktop (self-contained, single file)
-        run: >
-          dotnet publish src/WattLedger.App/WattLedger.App.csproj
-          -c Release -r win-x64 --self-contained true
-          -p:PublishSingleFile=true
-          -p:IncludeNativeLibrariesForSelfExtract=true
-          -o artifacts/desktop-win-x64
-
-      - name: Upload Windows desktop artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wattledger-desktop-win-x64
-          path: artifacts/desktop-win-x64
-          if-no-files-found: error
-
   linux:
     runs-on: ubuntu-latest
     container:
