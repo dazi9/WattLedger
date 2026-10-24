@@ -11,11 +11,11 @@ namespace WattLedger.App;
 
 public sealed class MainViewModel : INotifyPropertyChanged
 {
-    private static readonly Brush GreenBrush = Freeze(Color.FromRgb(61, 220, 151));
-    private static readonly Brush OrangeBrush = Freeze(Color.FromRgb(255, 180, 84));
-    private static readonly Brush BlueBrush = Freeze(Color.FromRgb(90, 169, 255));
-    private static readonly Brush MutedBrush = Freeze(Color.FromRgb(139, 152, 169));
-    private static readonly Brush RedBrush = Freeze(Color.FromRgb(255, 107, 107));
+    private static Brush GreenBrush => ThemeBrush("GreenBrush");
+    private static Brush OrangeBrush => ThemeBrush("OrangeBrush");
+    private static Brush BlueBrush => ThemeBrush("BlueBrush");
+    private static Brush MutedBrush => ThemeBrush("MutedBrush");
+    private static Brush RedBrush => ThemeBrush("RedBrush");
 
     private readonly WattLedgerService _service;
     private string _powerText = "—";
@@ -298,11 +298,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private static string FormatPercent(int? percent) => percent is null ? "—" : $"{percent}%";
 
-    private static Brush Freeze(Color color)
+    private static Brush ThemeBrush(string key) =>
+        Application.Current?.TryFindResource(key) as Brush ?? Brushes.Gray;
+
+    public void RefreshTheme()
     {
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-        return brush;
+        if (_startupError is not null) SetStartupFailure(_startupError);
+        else if (_service.Latest is { } status) ApplyStatus(status);
+        else
+        {
+            PowerBrush = GreenBrush;
+            StateBrush = BlueBrush;
+        }
     }
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

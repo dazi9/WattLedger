@@ -6,7 +6,7 @@ using WattLedger.Core.Engine;
 
 namespace WattLedger.Linux;
 
-public sealed class App : Application
+public sealed partial class App : Application
 {
     private WattLedgerService? _service;
     private SingleInstance? _singleInstance;
@@ -17,7 +17,11 @@ public sealed class App : Application
     private bool _shutdownPrepared;
     private bool _shutdownInProgress;
 
-    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void Initialize()
+    {
+        AvaloniaXamlLoader.Load(this);
+        InitializeTheme();
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {

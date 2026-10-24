@@ -8,23 +8,18 @@ namespace WattLedger.Linux;
 
 internal sealed class PowerChart : Control
 {
-    private static readonly IBrush GridBrush = Brush("#263341");
-    private static readonly IBrush LabelBrush = Brush("#9AAABD");
-    private static readonly IBrush PowerBrush = Brush("#3DDC97");
-    private static readonly IBrush BatteryBrush = Brush("#5AA9FF");
-    private static readonly IBrush SelectionBrush = Brush("#285AA9FF");
-    private static readonly IBrush HoverBrush = Brush("#E6111924");
+    private static readonly IBrush GridBrush = Brush("ChartGridBrush");
+    private static readonly IBrush LabelBrush = Brush("ChartLabelBrush");
+    private static readonly IBrush PowerBrush = Brush("ChartPowerBrush");
+    private static readonly IBrush BatteryBrush = Brush("ChartBatteryBrush");
+    private static readonly IBrush SelectionBrush = Brush("ChartSelectionBrush");
+    private static readonly IBrush HoverBrush = Brush("ChartHoverBrush");
     private static readonly IPen GridPen = new Pen(GridBrush, 1);
-    private static readonly IPen ZeroPen = new Pen(Brush("#526174"), 1.2);
+    private static readonly IPen ZeroPen = new Pen(Brush("ChartZeroBrush"), 1.2);
     private static readonly IPen PowerPen = new Pen(PowerBrush, 2.2, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
     private static readonly IPen BatteryPen = new Pen(BatteryBrush, 1.6, dashStyle: DashStyle.Dash);
     private static readonly IPen CursorPen = new Pen(LabelBrush, 1, dashStyle: DashStyle.Dot);
-    private static readonly IBrush AreaBrush = new LinearGradientBrush
-    {
-        StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-        EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
-        GradientStops = [new GradientStop(Color.Parse("#413DDC97"), 0), new GradientStop(Color.Parse("#053DDC97"), 1)]
-    };
+    private static readonly IBrush AreaBrush = ThemeResources.ChartAreaBrush;
     private PowerPoint[] _samples = [];
     private ChartTimeRange? _viewport;
     private PowerChartLayout? _layout;
@@ -46,6 +41,12 @@ internal sealed class PowerChart : Control
         Focusable = true;
         ClipToBounds = true;
         UpdateCursor();
+        ActualThemeVariantChanged += (_, _) =>
+        {
+            _layout = null;
+            _hoverText = null;
+            InvalidateVisual();
+        };
     }
 
     public event EventHandler? SelectionChanged;
@@ -367,7 +368,7 @@ internal sealed class PowerChart : Control
     private static double XAt(DateTimeOffset time, PowerChartLayout layout) => layout.PlotLeft +
         (time - layout.TimeStart).TotalSeconds / (layout.TimeEnd - layout.TimeStart).TotalSeconds * (layout.PlotRight - layout.PlotLeft);
     private static bool InPlot(Point point, PowerChartLayout layout) => point.X >= layout.PlotLeft && point.X <= layout.PlotRight && point.Y >= layout.PlotTop && point.Y <= layout.PlotBottom;
-    private static IBrush Brush(string color) => new SolidColorBrush(Color.Parse(color));
+    private static IBrush Brush(string key) => ThemeResources.Brush(key);
     private static FormattedText Text(string text, double size = 9) => new(text, System.Globalization.CultureInfo.CurrentCulture,
         FlowDirection.LeftToRight, new Typeface("sans-serif"), size, LabelBrush);
 }

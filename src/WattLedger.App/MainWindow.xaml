@@ -7,8 +7,8 @@
         MinHeight="640"
         MinWidth="960"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource WindowBackgroundBrush}"
-        Foreground="{StaticResource TextBrush}"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource TextBrush}"
         FontFamily="Segoe UI Variable Text, Segoe UI"
         TextOptions.TextFormattingMode="Display">
     <Grid Margin="28">
@@ -28,8 +28,8 @@
 
             <Border HorizontalAlignment="Right"
                     VerticalAlignment="Top"
-                    Background="{StaticResource CardBrush}"
-                    BorderBrush="{StaticResource BorderBrush}"
+                    Background="{DynamicResource CardBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="1"
                     CornerRadius="20"
                     Padding="14,7">
@@ -38,7 +38,7 @@
                     <TextBlock Text="{Binding StateText}"
                                FontSize="11"
                                FontWeight="SemiBold"
-                               Foreground="{StaticResource TextBrush}"
+                               Foreground="{DynamicResource TextBrush}"
                                VerticalAlignment="Center" />
                 </StackPanel>
             </Border>
@@ -64,7 +64,7 @@
             <Border Style="{StaticResource Card}" Margin="0,0,12,0">
                 <StackPanel>
                     <TextBlock Text="TIME LEFT" Style="{StaticResource MetricLabel}" />
-                    <TextBlock Text="{Binding TimeLeftText}" Style="{StaticResource MetricValue}" Foreground="{StaticResource BlueBrush}" Margin="0,6,0,0" />
+                    <TextBlock Text="{Binding TimeLeftText}" Style="{StaticResource MetricValue}" Foreground="{DynamicResource BlueBrush}" Margin="0,6,0,0" />
                     <TextBlock Text="{Binding TimeLeftDetailText}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
                 </StackPanel>
             </Border>
@@ -72,7 +72,7 @@
             <Border Style="{StaticResource Card}">
                 <StackPanel>
                     <TextBlock Text="TODAY" Style="{StaticResource MetricLabel}" />
-                    <TextBlock Text="{Binding TodayEnergyText}" Style="{StaticResource MetricValue}" Foreground="{StaticResource GreenBrush}" Margin="0,6,0,0" />
+                    <TextBlock Text="{Binding TodayEnergyText}" Style="{StaticResource MetricValue}" Foreground="{DynamicResource GreenBrush}" Margin="0,6,0,0" />
                     <TextBlock Text="{Binding TodayDetailText}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
                 </StackPanel>
             </Border>
@@ -88,9 +88,9 @@
                 <Grid>
                     <TextBlock Text="Power &amp; battery · today" Style="{StaticResource SectionTitle}" />
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <Rectangle Width="18" Height="2" Fill="{StaticResource GreenBrush}" Margin="0,0,6,0" />
+                        <Rectangle Width="18" Height="2" Fill="{DynamicResource GreenBrush}" Margin="0,0,6,0" />
                         <TextBlock Text="Power" Style="{StaticResource SubtleText}" Margin="0,0,16,0" />
-                        <Rectangle Width="18" Height="2" Fill="{StaticResource BlueBrush}" Margin="0,0,6,0" />
+                        <Rectangle Width="18" Height="2" Fill="{DynamicResource BlueBrush}" Margin="0,0,6,0" />
                         <TextBlock Text="Battery" Style="{StaticResource SubtleText}" />
                     </StackPanel>
                 </Grid>
@@ -137,6 +137,7 @@
         </Border>
 
         <Grid Grid.Row="4" Margin="0,14,0,0">
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
             <StackPanel Orientation="Horizontal">
                 <Button Content="Export CSV" Click="ExportCsv_Click" />
                 <Button Content="Export report" Click="ExportReport_Click" />
@@ -146,6 +147,11 @@
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button x:Name="AutostartButton" Content="Start with Windows" Click="Autostart_Click" />
                 <Button Content="Hide to tray" Click="Hide_Click" />
+            </StackPanel>
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,9,0,0">
+                <TextBlock Text="Theme" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox x:Name="ThemeSelector" Width="126" SelectionChanged="ThemeSelector_SelectionChanged"
+                          AutomationProperties.Name="Color theme" ToolTip="System follows the Windows app appearance" />
             </StackPanel>
         </Grid>
     </Grid>
