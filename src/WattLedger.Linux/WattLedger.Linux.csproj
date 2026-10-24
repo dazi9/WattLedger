@@ -21,6 +21,7 @@
     <Compile Include="../WattLedger.Desktop/PowerChartLayout.cs" Link="Shared/PowerChartLayout.cs" />
     <Compile Include="../WattLedger.Desktop/DashboardDataLoader.cs" Link="Shared/DashboardDataLoader.cs" />
     <Compile Include="../WattLedger.Desktop/ReportRefreshGate.cs" Link="Shared/ReportRefreshGate.cs" />
+    <Compile Include="../WattLedger.Desktop/ChartInteractionState.cs" Link="Shared/ChartInteractionState.cs" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../WattLedger.Desktop/ThemePreference.cs" Link="ThemePreference.cs" />

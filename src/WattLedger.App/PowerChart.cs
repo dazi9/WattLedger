@@ -11,7 +11,7 @@ namespace WattLedger.App;
 public sealed class PowerChart : FrameworkElement
 {
     private PowerPoint[] _samples = [];
-    private ChartTimeRange? _viewport;
+    private readonly ChartInteractionState _state = new();
     private PowerChartLayout? _layout;
     private Size _layoutSize;
     private readonly List<(Brush? Fill, Pen? Pen, StreamGeometry Geometry)> _geometry = [];
@@ -19,10 +19,8 @@ public sealed class PowerChart : FrameworkElement
     private readonly List<(FormattedText Text, Point Position)> _labels = [];
     private Point? _dragStart;
     private ChartTimeRange _dragRange;
-    private DateTimeOffset? _selectionAnchor;
     private PowerPoint? _hover;
     private bool _panning;
-    private double _followSeconds = 1800;
     private HwndSource? _source;
 
     public PowerChart()
@@ -41,9 +39,9 @@ public sealed class PowerChart : FrameworkElement
     public event EventHandler? SelectionChanged;
     public event EventHandler? ViewChanged;
     internal ChartInteractionMode InteractionMode { get; set; }
-    public bool IsFollowingLive { get; private set; } = true;
-    internal ChartSelectionStatistics? Selection { get; private set; }
-    internal ChartTimeRange VisibleRange => _viewport ?? ChartSeries.Extent(_samples);
+    public bool IsFollowingLive => _state.IsFollowingLive;
+    internal ChartSelectionStatistics? Selection => _state.Selection;
+    internal ChartTimeRange VisibleRange => _state.VisibleRange(_samples);
     internal bool CanPanEarlier => VisibleRange.Start > ChartSeries.Extent(_samples).Start;
     internal bool CanPanLater => VisibleRange.End < ChartSeries.Extent(_samples).End;
     internal IReadOnlyList<PowerPoint> Samples
@@ -52,68 +50,47 @@ public sealed class PowerChart : FrameworkElement
         set
         {
             _samples = ChartSeries.Normalize(value);
-            var extent = ChartSeries.Extent(_samples);
-            if (_viewport is { } prior && (prior.End < extent.Start || prior.Start > extent.End))
-            {
-                IsFollowingLive = true;
-                _followSeconds = 1800;
-            }
-            if (IsFollowingLive) _viewport = LatestRange(extent);
-            else if (_viewport is { } view) _viewport = view.Pan(0, extent);
-            if (Selection is { } selection)
-            {
-                if (_samples.Length == 0 || selection.End < _samples[0].Timestamp || selection.Start > _samples[^1].Timestamp)
-                    ClearSelection();
-                else SelectRange(selection.Start, selection.End);
-            }
+            var before = _state.Selection;
+            _state.OnSamplesChanged(_samples);
+            if (!ReferenceEquals(before, _state.Selection)) SelectionChanged?.Invoke(this, EventArgs.Empty);
             ChangedView();
         }
     }
-
-    private ChartTimeRange LatestRange(ChartTimeRange extent) =>
-        new(extent.End.AddSeconds(-Math.Min(_followSeconds, extent.Seconds)), extent.End);
 
     public void Zoom(double factor) => ZoomAt(factor, .5);
     public void Pan(double seconds)
     {
         if (!double.IsFinite(seconds)) return;
-        IsFollowingLive = false;
-        _viewport = VisibleRange.Pan(seconds, ChartSeries.Extent(_samples));
+        _state.Pan(_samples, seconds);
         ChangedView();
     }
     public void FollowLive()
     {
-        var extent = ChartSeries.Extent(_samples);
-        _followSeconds = VisibleRange.Seconds < extent.Seconds ? VisibleRange.Seconds : 1800;
-        IsFollowingLive = true;
-        _viewport = LatestRange(extent);
+        _state.FollowLive(_samples);
         ChangedView();
     }
-    public void ResetView() { IsFollowingLive = false; _viewport = ChartSeries.Extent(_samples); ChangedView(); }
+    public void ResetView() { _state.ResetView(_samples); ChangedView(); }
     public void ClearSelection()
     {
-        Selection = null;
-        _selectionAnchor = null;
+        _state.ClearSelection();
         SelectionChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
     internal void SelectRange(DateTimeOffset start, DateTimeOffset end)
     {
-        Selection = ChartSeries.Summarize(_samples, start, end);
+        _state.SelectRange(_samples, start, end);
         SelectionChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
     public void ZoomToSelection()
     {
-        if (Selection is not { DurationSeconds: > 0 } selection) return;
-        IsFollowingLive = false;
-        _viewport = new ChartTimeRange(selection.Start, selection.End).Zoom(1, .5, ChartSeries.Extent(_samples));
+        if (Selection is not { DurationSeconds: > 0 }) return;
+        _state.ZoomToSelection(_samples);
         ChangedView();
     }
     private void ZoomAt(double factor, double anchor)
     {
-        IsFollowingLive = false;
-        _viewport = VisibleRange.Zoom(factor, anchor, ChartSeries.Extent(_samples));
+        _state.ZoomAt(_samples, factor, anchor);
         ChangedView();
     }
     public void InvalidateTheme() { _layout = null; InvalidateVisual(); }
@@ -162,15 +139,15 @@ public sealed class PowerChart : FrameworkElement
         if (e.ClickCount == 2 && e.ChangedButton == MouseButton.Left) { ResetView(); e.Handled = true; return; }
         _dragStart = point;
         _dragRange = VisibleRange;
-        IsFollowingLive = false;
+        _state.StopFollowingLive();
         ViewChanged?.Invoke(this, EventArgs.Empty);
-        _panning = InteractionMode == ChartInteractionMode.Pan || e.ChangedButton == MouseButton.Middle ||
-                   Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+        _panning = _state.DecidePan(InteractionMode, e.ChangedButton == MouseButton.Middle,
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
         if (!_panning)
         {
-            _selectionAnchor = ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange)?.Timestamp;
-            if (_selectionAnchor is { } anchor) SelectRange(anchor, anchor);
-            else ClearSelection();
+            _state.BeginSelection(_samples, ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange)?.Timestamp);
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
+            InvalidateVisual();
         }
         CaptureMouse();
         e.Handled = true;
@@ -184,13 +161,17 @@ public sealed class PowerChart : FrameworkElement
         {
             if (_panning)
             {
-                IsFollowingLive = false;
-                _viewport = _dragRange.Pan(-(point.X - drag.X) / (layout.PlotRight - layout.PlotLeft) * _dragRange.Seconds,
-                    ChartSeries.Extent(_samples));
+                _state.StopFollowingLive();
+                _state.PanFrom(_samples, _dragRange,
+                    -(point.X - drag.X) / (layout.PlotRight - layout.PlotLeft) * _dragRange.Seconds);
                 ChangedView();
             }
-            else if (_selectionAnchor is { } anchor && ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange) is { } sample)
-                SelectRange(anchor, sample.Timestamp);
+            else if (ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange) is { } sample &&
+                     _state.ExtendSelection(_samples, sample.Timestamp))
+            {
+                SelectionChanged?.Invoke(this, EventArgs.Empty);
+                InvalidateVisual();
+            }
         }
         _hover = !(_dragStart is not null && _panning) && InPlot(point, layout)
             ? ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange) : null;
@@ -279,7 +260,7 @@ public sealed class PowerChart : FrameworkElement
     {
         if (_layout is not null && _layoutSize == RenderSize) return _layout;
         _layoutSize = RenderSize;
-        var layout = PowerChartLayout.CalculatePrepared(_samples, ActualWidth, ActualHeight, viewport: _viewport);
+        var layout = PowerChartLayout.CalculatePrepared(_samples, ActualWidth, ActualHeight, viewport: _state.Viewport);
         _layout = layout;
         _geometry.Clear(); _dots.Clear(); _labels.Clear();
         for (var i = 0; i <= 5; i++)
