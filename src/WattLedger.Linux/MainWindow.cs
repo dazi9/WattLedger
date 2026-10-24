@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -19,6 +20,7 @@ internal sealed class MainWindow : Window
     private readonly bool _monitorTrayHost;
     private readonly Action _shutdown;
     private readonly ReportRefreshGate _reportRefresh = new();
+    private readonly DashboardDataLoader _dataLoader;
     private readonly TextBlock _power = ValueText("—", 34, "#3DDC97");
     private readonly TextBlock _powerDetail = DetailText("Waiting for the first sample");
     private readonly TextBlock _battery = ValueText("—", 30, "#E9EEF5");
@@ -41,6 +43,10 @@ internal sealed class MainWindow : Window
     private readonly TextBlock _sampleCount = DetailText("No samples yet");
     private readonly StackPanel _ledgerRows = new() { Spacing = 0 };
     private readonly PowerChart _chart = new();
+    private readonly TextBlock _chartRange = DetailText("Waiting for samples");
+    private readonly TextBlock _selectionSummary = DetailText("Drag across the chart or enter two times to calculate a range.");
+    private readonly TextBox _selectionStart = new() { Watermark = "HH:mm:ss", Width = 98, FontSize = 11 };
+    private readonly TextBox _selectionEnd = new() { Watermark = "HH:mm:ss", Width = 98, FontSize = 11 };
     private readonly Button _startupButton;
     private readonly TrayIcon _trayIcon;
     private readonly DispatcherTimer _reportRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(350) };
@@ -52,8 +58,14 @@ internal sealed class MainWindow : Window
     private bool _checkingClose;
     private LedgerStatus? _latestStatus;
     private Task? _disposeTask;
+    private Task _reportRefreshTask = Task.CompletedTask;
+    private Task _exportTask = Task.CompletedTask;
+    private bool _exportInProgress;
+    private string? _startupError;
     private DateTimeOffset _lastReportRefreshUtc;
+    private DateTimeOffset _lastRecordedTimestamp;
     internal IReadOnlyList<PowerPoint> ChartSamples => _chart.Samples;
+    internal Task ReportRefreshTask => _reportRefreshTask;
 
     public MainWindow(
         WattLedgerService service,
@@ -63,6 +75,7 @@ internal sealed class MainWindow : Window
         TrayHostDetector? trayHostDetector = null)
     {
         _service = service;
+        _dataLoader = new DashboardDataLoader(service);
         _startInTray = startInTray;
         _monitorTrayHost = monitorTrayHost;
         _trayHostDetector = trayHostDetector ?? new TrayHostDetector();
@@ -86,9 +99,32 @@ internal sealed class MainWindow : Window
         Closed += OnClosed;
         _reportRefreshTimer.Tick += OnReportRefresh;
         _trayHostDetector.AvailabilityChanged += OnTrayHostAvailabilityChanged;
+        _chart.SelectionChanged += (_, _) => UpdateSelectionSummary();
+        _chart.ViewChanged += (_, _) => UpdateChartRange();
+        PropertyChanged += (_, args) =>
+        {
+            if (args.Property != WindowStateProperty && args.Property != IsVisibleProperty) return;
+            if (!CanRefresh)
+            {
+                _reportRefresh.SetVisible(false);
+                _reportRefreshTimer.Stop();
+            }
+            else if (_reportRefresh.SetVisible(true)) RefreshReportNow();
+        };
     }
 
-    public void SetStartupError(string message) => Post(() => _status.Text = message);
+    private bool CanRefresh => IsVisible && WindowState != WindowState.Minimized && !_disposed;
+
+    public void SetStartupError(string message) => Post(() =>
+    {
+        _startupError = message;
+        _status.Text = message;
+        _powerState.Text = "NOT RECORDING";
+        _powerState.Foreground = Brush("#F4BB66");
+        _powerStateDot.Background = Brush("#F4BB66");
+        _trayIcon.ToolTipText = "WattLedger · not recording";
+        ShowWindow();
+    });
 
     public void SetPlatformStatus(string message) => Post(() => _platformStatus.Text = message);
 
@@ -207,25 +243,100 @@ internal sealed class MainWindow : Window
         heading.Foreground = Brush("#E9EEF5");
         header.Children.Add(heading);
         var legend = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 18 };
-        legend.Children.Add(LegendItem("Power", "#3DDC97"));
+        legend.Children.Add(LegendItem("Power (+ discharge / − charge)", "#3DDC97"));
         legend.Children.Add(LegendItem("Battery", "#5AA9FF"));
         Grid.SetColumn(legend, 1);
         header.Children.Add(legend);
+        var tools = new WrapPanel();
+        tools.Children.Add(ActionButton("Zoom +", () => _chart.Zoom(0.5)));
+        tools.Children.Add(ActionButton("Zoom −", () => _chart.Zoom(2)));
+        tools.Children.Add(ActionButton("Fit today", _chart.ResetView));
+        tools.Children.Add(ActionButton("Fit selection", _chart.ZoomToSelection));
+        tools.Children.Add(ActionButton("Clear selection", _chart.ClearSelection));
+        var selection = new WrapPanel { Orientation = Orientation.Horizontal };
+        selection.Children.Add(new TextBlock { Text = "From", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8), FontSize = 11 });
+        _selectionStart.Name = "SelectionStart";
+        _selectionStart.Margin = new Thickness(0, 0, 8, 8);
+        Avalonia.Automation.AutomationProperties.SetName(_selectionStart, "Selection start time");
+        selection.Children.Add(_selectionStart);
+        selection.Children.Add(new TextBlock { Text = "to", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8), FontSize = 11 });
+        _selectionEnd.Name = "SelectionEnd";
+        _selectionEnd.Margin = new Thickness(0, 0, 8, 8);
+        Avalonia.Automation.AutomationProperties.SetName(_selectionEnd, "Selection end time");
+        selection.Children.Add(_selectionEnd);
+        selection.Children.Add(ActionButton("Calculate", SelectEnteredRange));
+        _selectionSummary.Name = "SelectionSummary";
         return PanelBorder(new StackPanel
         {
-            Spacing = 14,
+            Spacing = 8,
             Children =
             {
                 header,
+                tools,
+                _chartRange,
                 new Border
                 {
-                    Height = 210,
+                    Height = 240,
                     Background = Brush("#14181F"),
                     CornerRadius = new CornerRadius(9),
                     Child = _chart
-                }
+                },
+                DetailText("Wheel: zoom · Shift-drag: pan · Drag: select · Double-click: fit today"),
+                selection,
+                _selectionSummary,
+                DetailText("Range estimates use recorded power rates; missing readings and sleep gaps are excluded. Ledger totals also use capacity calibration.")
             }
         });
+    }
+
+    private void UpdateChartRange()
+    {
+        var range = _chart.VisibleRange;
+        _chartRange.Text = _chart.Samples.Count == 0 ? "No recorded samples today" :
+            $"View {range.Start.ToLocalTime():HH:mm:ss} – {range.End.ToLocalTime():HH:mm:ss} · {_chart.Samples.Count:N0} recorded points";
+    }
+
+    private void UpdateSelectionSummary()
+    {
+        var stats = _chart.Selection;
+        if (stats is null)
+        {
+            _selectionStart.Text = _selectionEnd.Text = "";
+            _selectionSummary.Text = "Drag across the chart or enter two times to calculate a range.";
+            return;
+        }
+        if (!_selectionStart.IsFocused && !_selectionEnd.IsFocused)
+        {
+            _selectionStart.Text = stats.Start.ToLocalTime().ToString("HH:mm:ss");
+            _selectionEnd.Text = stats.End.ToLocalTime().ToString("HH:mm:ss");
+        }
+        var energy = stats.CoveredSeconds > 0
+            ? $"net {stats.NetEnergyWh:+0.000;-0.000;0.000} Wh · used {stats.DischargeEnergyWh:0.000} Wh · charged {stats.ChargeEnergyWh:0.000} Wh · avg {stats.AverageWatts:0.00} W"
+            : "No continuous power readings in this range";
+        _selectionSummary.Text = $"{stats.SampleCount:N0} points · {ReportBuilder.FormatDuration(stats.DurationSeconds)} · {energy}\n" +
+                                 $"Coverage {stats.Coverage:P1} ({ReportBuilder.FormatDuration(stats.CoveredSeconds)})" +
+                                 (stats.Coverage < 1 ? " · partial" : "") +
+                                 (stats.MinimumWatts is { } min && stats.MaximumWatts is { } max ? $" · min {min:0.00} / max {max:0.00} W" : "");
+    }
+
+    private void SelectEnteredRange()
+    {
+        string[] formats = ["H:mm", "HH:mm", "H:mm:ss", "HH:mm:ss"];
+        if (!TimeOnly.TryParseExact(_selectionStart.Text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var start) ||
+            !TimeOnly.TryParseExact(_selectionEnd.Text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var end) || end <= start)
+        {
+            _selectionSummary.Text = "Enter two times as HH:mm or HH:mm:ss, with the end after the start.";
+            return;
+        }
+        var date = _chart.Samples.Count > 0 ? DateOnly.FromDateTime(_chart.Samples[0].Timestamp.LocalDateTime) : DateOnly.FromDateTime(DateTime.Today);
+        var from = new DateTimeOffset(date.ToDateTime(start, DateTimeKind.Local));
+        var to = new DateTimeOffset(date.ToDateTime(end, DateTimeKind.Local));
+        if (_chart.Samples.Count == 0 || to < _chart.Samples[0].Timestamp || from > _chart.Samples[^1].Timestamp)
+        {
+            _selectionSummary.Text = "Choose a range that overlaps today's recorded samples.";
+            return;
+        }
+        _chart.SelectRange(from, to);
     }
 
     private static Control LegendItem(string label, string color)
@@ -367,7 +478,7 @@ internal sealed class MainWindow : Window
             await _trayHostDetector.StartAsync();
             _trayHostDetectorStarted = true;
             _trayHostAvailable = _trayRegistered && _trayHostDetector.IsAvailable == true;
-            if (_startInTray && _trayHostAvailable) HideToTray();
+            if (_startInTray && _trayHostAvailable && _startupError is null) HideToTray();
         }
         catch (Exception ex)
         {
@@ -470,6 +581,9 @@ internal sealed class MainWindow : Window
         _service.StatusUpdated -= OnStatusUpdated;
         _service.SampleRecorded -= OnSampleRecorded;
         _service.Error -= OnError;
+        await _reportRefreshTask;
+        try { await _exportTask; }
+        catch (Exception ex) { Trace.TraceError("WattLedger export cleanup issue: {0}", ex); }
         await _trayHostDetector.DisposeAsync();
         _trayIcon.Dispose();
         TrayIcon.SetIcons(Application.Current!, new TrayIcons());
@@ -478,14 +592,18 @@ internal sealed class MainWindow : Window
     private void OnStatusUpdated(object? sender, LedgerStatus status) => Post(() =>
     {
         _latestStatus = status;
-        if (IsVisible) ApplyStatus(status);
+        if (CanRefresh) ApplyStatus(status);
         else UpdateTrayTooltip(status);
     });
 
     internal void OnSampleRecorded(object? sender, SampleRecord sample) => Post(() =>
     {
-        var becameVisible = _reportRefresh.SetVisible(IsVisible);
-        if (!IsVisible)
+        if (sample.Timestamp < _lastRecordedTimestamp ||
+            (_chart.Samples.Count > 0 && sample.Timestamp < _chart.Samples[^1].Timestamp))
+            _dataLoader.Invalidate();
+        _lastRecordedTimestamp = sample.Timestamp;
+        var becameVisible = _reportRefresh.SetVisible(CanRefresh);
+        if (!CanRefresh)
         {
             _reportRefreshTimer.Stop();
         }
@@ -525,14 +643,14 @@ internal sealed class MainWindow : Window
             estimatedPower = true;
         }
         _power.Text = battery.IsDischarging && power is { } discharge
-            ? $"−{discharge:0.0} W"
+            ? $"+{discharge:0.0} W"
             : battery.IsCharging && power is { } charge
-                ? $"+{charge:0.0} W"
+                ? $"−{charge:0.0} W"
                 : "—";
         _power.Foreground = Brush(battery.IsCharging ? "#5AA9FF" : battery.IsDischarging ? "#3DDC97" : "#8B98A9");
         _powerDetail.Text = status.Rapl.PackageWatts is { } package
             ? $"SoC {package:0.0} W · CPU {status.Rapl.CpuWatts.GetValueOrDefault():0.0} W"
-            : power is not null ? estimatedPower ? "Estimated from capacity change" : "Battery rate" : "Power rate unavailable";
+            : power is not null ? estimatedPower ? "Estimated from capacity change" : battery.IsCharging ? "Battery charging" : "Battery discharge" : "Power rate unavailable";
         _battery.Text = battery.Percent is { } percent ? $"{percent}%" : "—";
         var health = battery.HealthPercent is { } h ? $" · {h:0}% health" : "";
         if (battery.PercentIsEstimated) health += " · estimated";
@@ -564,7 +682,9 @@ internal sealed class MainWindow : Window
         var stateColor = battery.IsCharging || battery.IsAcOnline ? "#5AA9FF" : battery.IsDischarging ? "#3DDC97" : "#8B98A9";
         _powerState.Foreground = Brush(stateColor);
         _powerStateDot.Background = Brush(stateColor);
-        _status.Text = $"Recording locally · last sample {status.Timestamp.ToLocalTime():HH:mm:ss}";
+        _status.Text = battery.IsCharging || battery.IsDischarging || battery.IsAcOnline
+            ? $"Recording locally · last sample {status.Timestamp.ToLocalTime():HH:mm:ss}"
+            : $"State unavailable · session tracking paused · last reading {status.Timestamp.ToLocalTime():HH:mm:ss}";
         _trayIcon.ToolTipText = $"WattLedger · {_battery.Text} · {_power.Text}";
     }
 
@@ -591,27 +711,36 @@ internal sealed class MainWindow : Window
 
     private void RefreshReportNow()
     {
-        _reportRefresh.SetVisible(IsVisible);
-        if (!IsVisible)
+        _reportRefresh.SetVisible(CanRefresh);
+        if (!CanRefresh)
         {
             _reportRefreshTimer.Stop();
             return;
         }
 
-        if (!_reportRefresh.TryConsumeRefresh()) return;
+        if (!_reportRefreshTask.IsCompleted || !_reportRefresh.TryConsumeRefresh()) return;
         _lastReportRefreshUtc = DateTimeOffset.UtcNow;
+        _reportRefreshTask = LoadReportAsync();
+    }
+
+    private async Task LoadReportAsync()
+    {
         try
         {
-            var report = _service.GetTodayReport();
+            var snapshot = await Task.Run(() => _dataLoader.Load(DateTimeOffset.Now));
+            if (!CanRefresh)
+            {
+                _reportRefresh.MarkDirty();
+                return;
+            }
+            var report = snapshot.Report;
             _today.Text = $"{report.DischargeWh:0.0} Wh";
             _todayDetail.Text = $"active {ReportBuilder.FormatDuration(report.ActiveSeconds)} · standby {ReportBuilder.FormatDuration(report.StandbySeconds)}" +
                                 (report.StandbyEnergyIncomplete ? " · some sleep-gap energy unavailable" : "");
 
-            var start = new DateTimeOffset(DateTime.Today);
-            var now = DateTimeOffset.Now;
-            var samples = _service.GetSamples(start, now, 240);
-            _chart.Samples = samples.Select(sample => new PowerPoint(sample.Timestamp, sample.NetDischargeWatts, sample.BatteryPercent)).ToArray();
-            _sampleCount.Text = $"{samples.Count} samples";
+            _chart.Samples = snapshot.Samples;
+            UpdateChartRange();
+            _sampleCount.Text = $"{snapshot.Samples.Count:N0} samples";
             _ledgerRows.Children.Clear();
             foreach (var session in report.Sessions.Where(session => session.DurationSeconds > 0)
                          .OrderByDescending(session => session.Start).Take(40))
@@ -632,7 +761,12 @@ internal sealed class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _status.Text = $"Report unavailable: {ex.Message}";
+            _reportRefresh.MarkDirty();
+            if (!_disposed && _startupError is null) _status.Text = $"Report unavailable: {ex.Message}";
+        }
+        finally
+        {
+            if (CanRefresh && _reportRefresh.IsDirty) ScheduleReportRefresh();
         }
     }
 
@@ -715,6 +849,8 @@ internal sealed class MainWindow : Window
 
     private async void ExportAsync(string format)
     {
+        if (_exportInProgress || _disposed) return;
+        _exportInProgress = true;
         try
         {
             var extension = format == "md" ? "md" : format;
@@ -732,28 +868,38 @@ internal sealed class MainWindow : Window
                 DefaultExtension = extension
             });
             var path = file?.TryGetLocalPath();
-            if (path is null) return;
+            if (path is null || _disposed) return;
 
-            var report = _service.GetTodayReport();
-            switch (format)
+            _status.Text = "Exporting…";
+            var date = DateOnly.FromDateTime(DateTime.Today);
+            var now = DateTimeOffset.Now;
+            _exportTask = Task.Run(() =>
             {
-                case "csv":
-                    var start = new DateTimeOffset(DateTime.Today);
-                    ReportBuilder.ExportCsv(_service.GetSamples(start, DateTimeOffset.Now), path);
-                    break;
-                case "md":
-                    ReportBuilder.ExportMarkdown(report, path);
-                    break;
-                default:
-                    ReportBuilder.ExportJson(report, path);
-                    break;
-            }
+                switch (format)
+                {
+                    case "csv":
+                        var start = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local));
+                        ReportBuilder.ExportCsv(_service.GetSamples(start, now), path);
+                        break;
+                    case "md":
+                        ReportBuilder.ExportMarkdown(_service.GetReport(date), path);
+                        break;
+                    default:
+                        ReportBuilder.ExportJson(_service.GetReport(date), path);
+                        break;
+                }
+            });
+            await _exportTask;
 
-            _status.Text = $"Exported to {path}";
+            if (!_disposed) _status.Text = $"Exported to {path}";
         }
         catch (Exception ex)
         {
-            _status.Text = $"Export failed: {ex.Message}";
+            if (!_disposed) _status.Text = $"Export failed: {ex.Message}";
+        }
+        finally
+        {
+            _exportInProgress = false;
         }
     }
 
@@ -797,7 +943,7 @@ internal sealed class MainWindow : Window
         Show();
         WindowState = WindowState.Normal;
         Activate();
-        if (_reportRefresh.SetVisible(IsVisible)) RefreshReportNow();
+        if (_reportRefresh.SetVisible(CanRefresh)) RefreshReportNow();
         if (_latestStatus is not null) ApplyStatus(_latestStatus);
     }
 
@@ -805,9 +951,9 @@ internal sealed class MainWindow : Window
     {
         var battery = status.Battery.Percent is { } percent ? $"{percent}%" : "—";
         var rate = status.Battery.IsDischarging && status.Battery.DischargeWatts is { } discharge
-            ? $"−{discharge:0.0} W"
+            ? $"+{discharge:0.0} W"
             : status.Battery.IsCharging && status.Battery.ChargeWatts is { } charge
-                ? $"+{charge:0.0} W"
+                ? $"−{charge:0.0} W"
                 : "—";
         _trayIcon.ToolTipText = $"WattLedger · {battery} · {rate}";
     }

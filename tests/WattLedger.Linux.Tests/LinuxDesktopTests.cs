@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -244,7 +245,7 @@ public sealed class LinuxDesktopTests
         try
         {
             window.Show();
-            await Dispatcher.UIThread.InvokeAsync(() => { });
+            await window.ReportRefreshTask;
             Assert.Empty(window.ChartSamples);
 
             var originalSamples = window.ChartSamples;
@@ -264,10 +265,22 @@ public sealed class LinuxDesktopTests
             Assert.Empty(window.ChartSamples);
 
             window.ShowWindow();
+            await window.ReportRefreshTask;
             var point = Assert.Single(window.ChartSamples);
             Assert.Equal(sample.Timestamp.ToUnixTimeMilliseconds(), point.Timestamp.ToUnixTimeMilliseconds());
             Assert.Equal(61, point.BatteryPercent);
             Assert.Equal(3.2, point.Watts);
+
+            window.WindowState = WindowState.Minimized;
+            var shownSamples = window.ChartSamples;
+            var next = sample with { Timestamp = sample.Timestamp.AddMilliseconds(1), BatteryPercent = 60 };
+            service.Database.InsertSample(next);
+            window.OnSampleRecorded(service, next);
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.Same(shownSamples, window.ChartSamples);
+            window.WindowState = WindowState.Normal;
+            await window.ReportRefreshTask;
+            Assert.Equal(2, window.ChartSamples.Count);
 
             window.Hide();
             trayDetector.SetAvailability(true);
@@ -275,6 +288,72 @@ public sealed class LinuxDesktopTests
             trayDetector.NotifyConnectionLost();
             await Dispatcher.UIThread.InvokeAsync(() => { });
             Assert.True(window.IsVisible);
+
+            window.Hide();
+            window.SetStartupError("Could not start sampling: another sampler owns the database.");
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            await window.ReportRefreshTask;
+            Assert.True(window.IsVisible);
+            Assert.Contains(Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(window).OfType<TextBlock>(),
+                text => text.Text == "NOT RECORDING");
+        }
+        finally
+        {
+            await window.DisposeAsync();
+            window.Hide();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Chart_uses_all_samples_and_accepts_custom_range()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"wattledger-chart-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        using var service = new WattLedgerService(Path.Combine(root, "ledger.sqlite"));
+        service.Database.Initialize();
+        var start = new DateTimeOffset(DateTime.Today);
+        // Use a fixed, fully elapsed range, including when the test runs just after midnight.
+        var step = Math.Min(5, Math.Max(.001, (DateTimeOffset.Now - start).TotalSeconds / 400));
+        for (var i = 0; i < 361; i++)
+            service.Database.InsertSample(new WattLedger.Core.Models.SampleRecord
+            {
+                Timestamp = start.AddSeconds(i * step),
+                PowerState = "Battery",
+                IsDischarging = true,
+                DischargeMw = 6000 + (long)(2000 * Math.Sin(i / 12d)),
+                BatteryPercent = 80 - i / 30
+            });
+        var window = new MainWindow(service, false, () => { }, monitorTrayHost: false);
+        try
+        {
+            window.Show();
+            await window.ReportRefreshTask;
+            Assert.Equal(361, window.ChartSamples.Count);
+            var controls = Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(window).ToArray();
+            var from = Assert.Single(controls.OfType<TextBox>(), box => box.Name == "SelectionStart");
+            var to = Assert.Single(controls.OfType<TextBox>(), box => box.Name == "SelectionEnd");
+            var calculate = Assert.Single(controls.OfType<Button>(), button => Equals(button.Content, "Calculate"));
+            from.Text = "00:00:00";
+            to.Text = "00:15:00";
+            calculate.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            var summary = Assert.Single(controls.OfType<TextBlock>(), text => text.Name == "SelectionSummary");
+            Assert.Contains("Coverage", summary.Text);
+            Assert.Contains("used", summary.Text);
+            from.Text = "not a time";
+            calculate.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Assert.Contains("Enter two times", summary.Text);
+
+            from.Text = "00:00:00";
+            calculate.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            if (Environment.GetEnvironmentVariable("WATTLEDGER_PREVIEW_PATH") is { Length: > 0 } path)
+            {
+                window.Height = 1050;
+                Dispatcher.UIThread.RunJobs();
+                using var bitmap = window.CaptureRenderedFrame();
+                Assert.NotNull(bitmap);
+                bitmap.Save(path);
+            }
         }
         finally
         {

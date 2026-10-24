@@ -15,8 +15,10 @@ public partial class App : Application
     private WattLedgerService? _service;
     private MainWindow? _window;
     private TaskbarIcon? _tray;
+    private Task<bool>? _startupTask;
+    private bool _exiting;
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
@@ -33,21 +35,47 @@ public partial class App : Application
             return;
         }
 
-        _service = new WattLedgerService(GetOption(e.Args, "--db"));
-        _service.Initialize();
-        _service.StatusUpdated += OnStatusUpdated;
-
-        _window = new MainWindow(_service);
-        MainWindow = _window;
-        _tray = CreateTrayIcon();
-
-        if (!e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase))
+        try
         {
-            _window.Show();
-        }
+            _service = new WattLedgerService(GetOption(e.Args, "--db"));
+            _service.Initialize();
+            _service.StatusUpdated += OnStatusUpdated;
 
-        _ = _service.StartAsync();
-        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            _window = new MainWindow(_service);
+            MainWindow = _window;
+            _tray = CreateTrayIcon();
+
+            if (!e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase))
+            {
+                _window.Show();
+            }
+
+            // App owns startup, including when --tray never raises Window.Loaded.
+            _startupTask = new SamplerStartup(() => _service.StartAsync(), ReportStartupFailure).StartAsync();
+            if (await _startupTask && !_exiting)
+            {
+                SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            }
+        }
+        catch (Exception ex)
+        {
+            ReportStartupFailure(ex);
+            ExitApplication();
+        }
+    }
+
+    private void ReportStartupFailure(Exception error)
+    {
+        if (_exiting) return;
+        if (_tray is not null) _tray.ToolTipText = "Not recording · WattLedger";
+        _window?.SetStartupFailure(error.Message);
+        // Use a dialog even when hidden: Windows can suppress tray balloons.
+        MessageBox.Show(
+            $"WattLedger is not recording.\n\n{error.Message}\n\n" +
+            "If another sampler is using this database, stop it and restart WattLedger.",
+            "WattLedger could not start",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
     }
 
     public void ShowMainWindow()
@@ -57,6 +85,7 @@ public partial class App : Application
 
     public void ExitApplication()
     {
+        _exiting = true;
         _window?.AllowClose();
         _window?.Close();
         Shutdown();
@@ -137,7 +166,9 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _exiting = true;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        if (_service is not null) _service.StatusUpdated -= OnStatusUpdated;
         _service?.Dispose();
         _tray?.Dispose();
 

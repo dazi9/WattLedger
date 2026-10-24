@@ -19,6 +19,8 @@ internal static class PlatformSensorFactory
     internal static bool WindowsShouldTrackSessions(BatterySnapshot battery) =>
         battery.BatteryCount > 0 || battery.Percent is not null || battery.IsAcOnline;
 
+    // Full/Unknown without evidence of external power cannot identify AC versus
+    // battery use. Preserve the sample but end session continuity (see METHODOLOGY).
     internal static bool LinuxShouldTrackSessions(BatterySnapshot battery) =>
         battery.BatteryCount > 0 && (battery.IsCharging || battery.IsDischarging || battery.IsAcOnline);
 

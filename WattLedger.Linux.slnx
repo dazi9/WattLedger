@@ -5,6 +5,7 @@
     <Project Path="src/WattLedger.Linux/WattLedger.Linux.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/WattLedger.App.Tests/WattLedger.App.Tests.csproj" />
     <Project Path="tests/WattLedger.Core.Tests/WattLedger.Core.Tests.csproj" />
     <Project Path="tests/WattLedger.Linux.Tests/WattLedger.Linux.Tests.csproj" />
   </Folder>

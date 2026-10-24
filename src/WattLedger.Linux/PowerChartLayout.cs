@@ -35,24 +35,27 @@ internal sealed record PowerChartLayout(
         IReadOnlyList<PowerPoint> samples,
         double width,
         double height,
-        TimeSpan? maximumGap = null)
+        TimeSpan? maximumGap = null,
+        ChartTimeRange? viewport = null) =>
+        CalculatePrepared(ChartSeries.Normalize(samples), width, height, maximumGap, viewport);
+
+    public static PowerChartLayout CalculatePrepared(
+        IReadOnlyList<PowerPoint> samples, double width, double height,
+        TimeSpan? maximumGap = null, ChartTimeRange? viewport = null)
     {
         const double left = 42;
         const double right = 42;
         const double top = 16;
         const double bottom = 38;
-        const double minimumSpanSeconds = 60;
 
         var plotLeft = left;
         var plotRight = Math.Max(left + 1, width - right);
         var plotTop = top;
         var plotBottom = Math.Max(top + 1, height - bottom);
-        var ordered = samples
-            .Where(sample => sample.Timestamp != default)
-            .OrderBy(sample => sample.Timestamp)
-            .GroupBy(sample => sample.Timestamp)
-            .Select(group => group.Last())
-            .ToArray();
+        var extent = ChartSeries.Extent(samples);
+        var range = viewport is { Seconds: > 0 } requested ? requested : extent;
+        var gapLimit = maximumGap ?? ChartSeries.MaximumGap;
+        var ordered = ClipToRange(samples, range, gapLimit);
 
         var measuredPower = ordered.Where(sample => sample.Watts.HasValue)
             .Select(sample => sample.Watts!.Value).ToArray();
@@ -63,27 +66,15 @@ internal sealed record PowerChartLayout(
         var powerMaximum = measuredMaximum <= 0 ? 0 : powerExtent;
         if (powerMinimum == powerMaximum) powerMaximum = 5;
 
-        var first = ordered.Length == 0 ? DateTimeOffset.Now : ordered[0].Timestamp;
-        var last = ordered.Length == 0 ? first.AddSeconds(minimumSpanSeconds) : ordered[^1].Timestamp;
-        var actualSpan = (last - first).TotalSeconds;
-        var timeStart = first;
-        var timeEnd = last;
-        if (actualSpan < minimumSpanSeconds)
-        {
-            var padding = (minimumSpanSeconds - actualSpan) / 2;
-            timeStart = first.AddSeconds(-padding);
-            timeEnd = last.AddSeconds(padding);
-        }
-
-        var spanSeconds = Math.Max(minimumSpanSeconds, (timeEnd - timeStart).TotalSeconds);
+        var first = ordered.Length == 0 ? range.Start : ordered[0].Timestamp;
+        var last = ordered.Length == 0 ? range.End : ordered[^1].Timestamp;
+        var timeStart = range.Start;
+        var timeEnd = range.End;
+        var spanSeconds = range.Seconds;
         var plotWidth = plotRight - plotLeft;
         var plotHeight = plotBottom - plotTop;
         var powerRange = powerMaximum - powerMinimum;
         var zeroY = plotBottom - (0 - powerMinimum) / powerRange * plotHeight;
-        // GetSamples decimates to maxPoints, so short intervals in the stored series may
-        // appear much larger here. Keep this visual threshold conservative; true sleep
-        // gap boundaries require session metadata from the caller.
-        var gapLimit = maximumGap ?? TimeSpan.FromMinutes(10);
         var points = ordered.Select(sample => new PowerChartPoint(
             sample.Timestamp,
             sample.Watts ?? 0,
@@ -92,13 +83,61 @@ internal sealed record PowerChartLayout(
                 plotLeft + (sample.Timestamp - timeStart).TotalSeconds / spanSeconds * plotWidth,
                 plotBottom - ((sample.Watts ?? 0) - powerMinimum) / powerRange * plotHeight))).ToArray();
 
-        var powerRuns = BuildRuns(ordered, points, gapLimit, zeroY);
-        var batteryRuns = BuildBatteryRuns(ordered, points, gapLimit, plotBottom, plotHeight);
+        var powerRuns = BuildRuns(ordered, points, gapLimit, zeroY)
+            .Select(run => run with { Points = ReduceToPixels(run.Points) }).ToArray();
+        var batteryRuns = BuildBatteryRuns(ordered, points, gapLimit, plotBottom, plotHeight)
+            .Select(ReduceToPixels).ToArray();
         var ticks = BuildTimeTicks(timeStart, timeEnd, first, last, ordered.Length > 0, plotLeft, plotWidth, spanSeconds);
 
         return new PowerChartLayout(timeStart, timeEnd, ordered.Length == 0 ? null : first,
             ordered.Length == 0 ? null : last, plotLeft, plotRight, plotTop, plotBottom,
             zeroY, powerMinimum, powerMaximum, powerRuns, batteryRuns, ticks);
+    }
+
+    private static PowerPoint[] ClipToRange(IReadOnlyList<PowerPoint> samples, ChartTimeRange range, TimeSpan maximumGap)
+    {
+        var first = ChartSeries.LowerBound(samples, range.Start);
+        var last = ChartSeries.LowerBound(samples, range.End);
+        var result = new List<PowerPoint>();
+        PowerPoint? Boundary(DateTimeOffset time, int index)
+        {
+            if (index == 0 || index == samples.Count || samples[index].Timestamp == time) return null;
+            var a = samples[index - 1];
+            var b = samples[index];
+            if (b.BreakBefore || b.Timestamp - a.Timestamp > maximumGap) return null;
+            var ratio = (time - a.Timestamp).TotalSeconds / (b.Timestamp - a.Timestamp).TotalSeconds;
+            return new PowerPoint(time,
+                a.Watts is { } aw && b.Watts is { } bw ? aw + (bw - aw) * ratio : null,
+                a.BatteryPercent is { } ap && b.BatteryPercent is { } bp ? (int)Math.Round(ap + (bp - ap) * ratio) : null);
+        }
+        if (Boundary(range.Start, first) is { } left) result.Add(left);
+        for (var i = first; i < samples.Count && samples[i].Timestamp <= range.End; i++) result.Add(samples[i]);
+        if (Boundary(range.End, last) is { } right) result.Add(right);
+        return result.ToArray();
+    }
+
+    // Keep temporal endpoints and both extrema per pixel column, including narrow spikes.
+    // This operates on each continuous run only: missing readings and sleep gaps stay broken.
+    private static IReadOnlyList<PowerChartPoint> ReduceToPixels(IReadOnlyList<PowerChartPoint> points)
+    {
+        if (points.Count < 4) return points;
+        var result = new List<PowerChartPoint>();
+        for (var first = 0; first < points.Count;)
+        {
+            var last = first;
+            var min = first;
+            var max = first;
+            var pixel = Math.Floor(points[first].Position.X);
+            while (last + 1 < points.Count && Math.Floor(points[last + 1].Position.X) == pixel)
+            {
+                last++;
+                if (points[last].Position.Y < points[min].Position.Y) min = last;
+                if (points[last].Position.Y > points[max].Position.Y) max = last;
+            }
+            foreach (var index in new[] { first, min, max, last }.Distinct().Order()) result.Add(points[index]);
+            first = last + 1;
+        }
+        return result;
     }
 
     private static IReadOnlyList<PowerChartRun> BuildRuns(
@@ -126,7 +165,7 @@ internal sealed record PowerChartLayout(
                 continue;
             }
 
-            if (i > 0 && samples[i].Timestamp - samples[i - 1].Timestamp > gapLimit) Flush();
+            if (samples[i].BreakBefore || (i > 0 && samples[i].Timestamp - samples[i - 1].Timestamp > gapLimit)) Flush();
             var isCharging = watts < 0;
             var point = points[i];
             if (current.Count == 0)
@@ -182,7 +221,7 @@ internal sealed record PowerChartLayout(
                 Flush();
                 continue;
             }
-            if (i > 0 && samples[i].Timestamp - samples[i - 1].Timestamp > gapLimit) Flush();
+            if (samples[i].BreakBefore || (i > 0 && samples[i].Timestamp - samples[i - 1].Timestamp > gapLimit)) Flush();
             var point = points[i] with
             {
                 Position = points[i].Position with
@@ -211,12 +250,13 @@ internal sealed record PowerChartLayout(
         if (step == 0) step = Math.Ceiling(targetStep / 86400) * 86400;
 
         var ticks = new List<PowerChartTimeTick>();
+        var labelSpacing = spanSeconds >= 86400 ? 82 : spanSeconds < 300 ? 54 : 42;
         if (hasSamples)
         {
             var actualStartX = left + (actualStart - start).TotalSeconds / spanSeconds * width;
             var actualEndX = left + (actualEnd - start).TotalSeconds / spanSeconds * width;
             ticks.Add(new PowerChartTimeTick(actualStart, actualStartX, FormatTime(actualStart, spanSeconds)));
-            if (actualEnd != actualStart)
+            if (actualEnd != actualStart && actualEndX - actualStartX >= labelSpacing)
                 ticks.Add(new PowerChartTimeTick(actualEnd, actualEndX, FormatTime(actualEnd, spanSeconds)));
         }
         var localStart = start.ToLocalTime();
@@ -227,8 +267,7 @@ internal sealed record PowerChartLayout(
         {
             if (tick < start) continue;
             var x = left + (tick - start).TotalSeconds / spanSeconds * width;
-            if (ticks.Any(existing => Math.Abs(existing.X - x) < 42)) continue;
-            var local = tick.ToLocalTime();
+            if (ticks.Any(existing => Math.Abs(existing.X - x) < labelSpacing)) continue;
             ticks.Add(new PowerChartTimeTick(tick, x, FormatTime(tick, spanSeconds)));
         }
 
