@@ -1,3 +1,4 @@
+using WattLedger.Desktop;
 using System.Diagnostics;
 using System.Globalization;
 using Avalonia;
@@ -43,8 +44,14 @@ internal sealed class MainWindow : Window
     private readonly TextBlock _sampleCount = DetailText("No samples yet");
     private readonly StackPanel _ledgerRows = new() { Spacing = 0 };
     private readonly PowerChart _chart = new();
+    private Button? _panModeButton;
+    private Button? _selectModeButton;
+    private Button? _followLiveButton;
+    private Button? _earlierButton;
+    private Button? _laterButton;
+    private readonly TextBlock _chartNavigationHint = DetailText("Pan mode: drag left/right to explore today's data.");
     private readonly TextBlock _chartRange = DetailText("Waiting for samples");
-    private readonly TextBlock _selectionSummary = DetailText("Drag across the chart or enter two times to calculate a range.");
+    private readonly TextBlock _selectionSummary = DetailText("Choose Select and drag across the chart, or enter two times to calculate a range.");
     private readonly TextBox _selectionStart = new() { Watermark = "HH:mm:ss", Width = 98, FontSize = 11 };
     private readonly TextBox _selectionEnd = new() { Watermark = "HH:mm:ss", Width = 98, FontSize = 11 };
     private readonly Button _startupButton;
@@ -248,6 +255,16 @@ internal sealed class MainWindow : Window
         Grid.SetColumn(legend, 1);
         header.Children.Add(legend);
         var tools = new WrapPanel();
+        _panModeButton = ActionButton("Pan ✓", () => _chart.InteractionMode = ChartInteractionMode.Pan);
+        _selectModeButton = ActionButton("Select", () => _chart.InteractionMode = ChartInteractionMode.Select);
+        _earlierButton = ActionButton("← Earlier", () => _chart.Pan(-_chart.VisibleRange.Seconds * .2));
+        _laterButton = ActionButton("Later →", () => _chart.Pan(_chart.VisibleRange.Seconds * .2));
+        _followLiveButton = ActionButton("Following live ✓", _chart.FollowLive);
+        tools.Children.Add(_panModeButton);
+        tools.Children.Add(_selectModeButton);
+        tools.Children.Add(_earlierButton);
+        tools.Children.Add(_laterButton);
+        tools.Children.Add(_followLiveButton);
         tools.Children.Add(ActionButton("Zoom +", () => _chart.Zoom(0.5)));
         tools.Children.Add(ActionButton("Zoom −", () => _chart.Zoom(2)));
         tools.Children.Add(ActionButton("Fit today", _chart.ResetView));
@@ -266,6 +283,7 @@ internal sealed class MainWindow : Window
         selection.Children.Add(_selectionEnd);
         selection.Children.Add(ActionButton("Calculate", SelectEnteredRange));
         _selectionSummary.Name = "SelectionSummary";
+        UpdateChartRange();
         return PanelBorder(new StackPanel
         {
             Spacing = 8,
@@ -281,7 +299,8 @@ internal sealed class MainWindow : Window
                     CornerRadius = new CornerRadius(9),
                     Child = _chart
                 },
-                DetailText("Wheel: zoom · Shift-drag: pan · Drag: select · Double-click: fit today"),
+                _chartNavigationHint,
+                DetailText("Horizontal scroll: pan · Vertical / Ctrl+wheel: zoom · Shift/middle drag: pan · Double-click / Home: fit today · End: follow live"),
                 selection,
                 _selectionSummary,
                 DetailText("Range estimates use recorded power rates; missing readings and sleep gaps are excluded. Ledger totals also use capacity calibration.")
@@ -292,8 +311,32 @@ internal sealed class MainWindow : Window
     private void UpdateChartRange()
     {
         var range = _chart.VisibleRange;
-        _chartRange.Text = _chart.Samples.Count == 0 ? "No recorded samples today" :
-            $"View {range.Start.ToLocalTime():HH:mm:ss} – {range.End.ToLocalTime():HH:mm:ss} · {_chart.Samples.Count:N0} recorded points";
+        var hasSamples = _chart.Samples.Count > 0;
+        var fullRange = !_chart.CanPanEarlier && !_chart.CanPanLater;
+        var boundary = fullRange ? "All today's data fits; zoom in to pan" :
+            !_chart.CanPanEarlier ? "At the earliest recorded data" : !_chart.CanPanLater ? "At the latest recorded data" : "Earlier and later data available";
+        _chartRange.Text = !hasSamples ? "No recorded samples today" :
+            $"{(_chart.IsFollowingLive ? "Following live" : "View paused")} · {range.Start.ToLocalTime():HH:mm:ss} – {range.End.ToLocalTime():HH:mm:ss} · {_chart.Samples.Count:N0} points · {boundary}";
+        _chartNavigationHint.Text = _chart.InteractionMode == ChartInteractionMode.Pan
+            ? "Pan mode: drag left/right to move through today's recorded data. Choose Select to measure a range."
+            : "Select mode: drag between two recorded points to calculate a range. Choose Pan to move the view.";
+        if (_panModeButton is not null)
+        {
+            _panModeButton.Content = _chart.InteractionMode == ChartInteractionMode.Pan ? "Pan ✓" : "Pan";
+            _panModeButton.IsEnabled = _chart.InteractionMode != ChartInteractionMode.Pan;
+        }
+        if (_selectModeButton is not null)
+        {
+            _selectModeButton.Content = _chart.InteractionMode == ChartInteractionMode.Select ? "Select ✓" : "Select";
+            _selectModeButton.IsEnabled = _chart.InteractionMode != ChartInteractionMode.Select;
+        }
+        if (_earlierButton is not null) _earlierButton.IsEnabled = hasSamples && _chart.CanPanEarlier;
+        if (_laterButton is not null) _laterButton.IsEnabled = hasSamples && _chart.CanPanLater;
+        if (_followLiveButton is not null)
+        {
+            _followLiveButton.Content = _chart.IsFollowingLive ? "Following live ✓" : "Follow live";
+            _followLiveButton.IsEnabled = hasSamples && !_chart.IsFollowingLive;
+        }
     }
 
     private void UpdateSelectionSummary()
@@ -302,7 +345,7 @@ internal sealed class MainWindow : Window
         if (stats is null)
         {
             _selectionStart.Text = _selectionEnd.Text = "";
-            _selectionSummary.Text = "Drag across the chart or enter two times to calculate a range.";
+            _selectionSummary.Text = "Choose Select and drag across the chart, or enter two times to calculate a range.";
             return;
         }
         if (!_selectionStart.IsFocused && !_selectionEnd.IsFocused)

@@ -1,3 +1,4 @@
+using WattLedger.Desktop;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
 using WattLedger.Linux;

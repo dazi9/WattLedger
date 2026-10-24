@@ -1,4 +1,4 @@
-namespace WattLedger.Linux;
+namespace WattLedger.Desktop;
 
 internal readonly record struct ChartCoordinate(double X, double Y);
 

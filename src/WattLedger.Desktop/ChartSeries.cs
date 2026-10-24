@@ -1,4 +1,8 @@
-namespace WattLedger.Linux;
+namespace WattLedger.Desktop;
+
+internal sealed record PowerPoint(DateTimeOffset Timestamp, double? Watts, int? BatteryPercent = null, bool BreakBefore = false);
+
+internal enum ChartInteractionMode { Pan, Select }
 
 internal readonly record struct ChartTimeRange(DateTimeOffset Start, DateTimeOffset End)
 {

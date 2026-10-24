@@ -1,4 +1,4 @@
-namespace WattLedger.Linux;
+namespace WattLedger.Desktop;
 
 /// <summary>Tracks report invalidation while keeping hidden windows free of report work.</summary>
 internal sealed class ReportRefreshGate
