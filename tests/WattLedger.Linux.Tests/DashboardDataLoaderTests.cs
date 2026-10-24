@@ -19,7 +19,9 @@ public sealed class DashboardDataLoaderTests
         fixture.Add(start.AddSeconds(10), 9000);
         fixture.Service.Database.UpsertSession(new SessionRecord
         {
-            Start = start, End = start.AddSeconds(10), Type = "SleepGap",
+            Start = start,
+            End = start.AddSeconds(10),
+            Type = "SleepGap",
             Note = "Suspend/resume event confirmed"
         });
 
@@ -78,8 +80,11 @@ public sealed class DashboardDataLoaderTests
 
         public void Add(DateTimeOffset timestamp, long milliwatts) => Service.Database.InsertSample(new SampleRecord
         {
-            Timestamp = timestamp, PowerState = "Battery", IsDischarging = true,
-            DischargeMw = milliwatts, BatteryPercent = 80
+            Timestamp = timestamp,
+            PowerState = "Battery",
+            IsDischarging = true,
+            DischargeMw = milliwatts,
+            BatteryPercent = 80
         });
 
         public void Dispose()

@@ -318,8 +318,11 @@ public sealed class LinuxDesktopTests
         for (var i = 0; i < 361; i++)
             service.Database.InsertSample(new WattLedger.Core.Models.SampleRecord
             {
-                Timestamp = start.AddSeconds(i * step), PowerState = "Battery", IsDischarging = true,
-                DischargeMw = 6000 + (long)(2000 * Math.Sin(i / 12d)), BatteryPercent = 80 - i / 30
+                Timestamp = start.AddSeconds(i * step),
+                PowerState = "Battery",
+                IsDischarging = true,
+                DischargeMw = 6000 + (long)(2000 * Math.Sin(i / 12d)),
+                BatteryPercent = 80 - i / 30
             });
         var window = new MainWindow(service, false, () => { }, monitorTrayHost: false);
         try

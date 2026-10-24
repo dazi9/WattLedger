@@ -319,7 +319,8 @@ public sealed class PowerChartTests
         var first = DateTimeOffset.Now;
         var chart = new PowerChart
         {
-            Width = 440, Height = 160,
+            Width = 440,
+            Height = 160,
             Samples = Enumerable.Range(0, 121).Select(i => new PowerPoint(first.AddSeconds(i), 12, 50)).ToArray()
         };
         chart.Measure(new Size(440, 160));
