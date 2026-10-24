@@ -24,13 +24,19 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Resolve release version
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            Add-Content $env:GITHUB_ENV "EXTRA_VERSION_ARGS=-p:Version=$($env:GITHUB_REF_NAME.Substring(1))"
+          }
+
       - name: Publish Windows CLI (self-contained, single file)
         run: >
           dotnet publish src/WattLedger.Cli/WattLedger.Cli.csproj
           -c Release -r win-x64 --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
-          -o artifacts/cli-win-x64
+          -o artifacts/cli-win-x64 $env:EXTRA_VERSION_ARGS
 
       - name: Publish Windows desktop (self-contained, single file)
         run: >
@@ -38,7 +44,7 @@ jobs:
           -c Release -r win-x64 --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
-          -o artifacts/desktop-win-x64
+          -o artifacts/desktop-win-x64 $env:EXTRA_VERSION_ARGS
 
       - name: Upload Windows CLI artifact
         uses: actions/upload-artifact@v4
@@ -79,13 +85,19 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Resolve release version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "EXTRA_VERSION_ARGS=-p:Version=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          fi
+
       - name: Publish CLI (self-contained, single file)
         run: >
           dotnet publish src/WattLedger.Cli/WattLedger.Cli.csproj
           -c Release -r linux-x64 --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
-          -o artifacts/cli-linux-x64
+          -o artifacts/cli-linux-x64 $EXTRA_VERSION_ARGS
 
       - name: Publish Linux desktop (self-contained, single file)
         run: >
@@ -93,7 +105,7 @@ jobs:
           -c Release -r linux-x64 --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
-          -o artifacts/desktop-linux-x64
+          -o artifacts/desktop-linux-x64 $EXTRA_VERSION_ARGS
 
       - name: Smoke-test Linux desktop startup under Xvfb
         run: tools/smoke-linux.sh artifacts/desktop-linux-x64/WattLedger.Linux artifacts/cli-linux-x64/wattledger
