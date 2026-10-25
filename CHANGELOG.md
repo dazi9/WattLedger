@@ -4,6 +4,22 @@ All notable changes to WattLedger are documented here. The format is based on [K
 
 ## [Unreleased]
 
+### Added
+
+- Chart boundary status on Windows matching Linux ("At the earliest recorded data", "At the latest recorded data", "All today's data fits; zoom in to pan", "Earlier and later data available").
+- Headless chart test covering the new click/drag follow-live rule; state-machine test documenting that drag-origin panning keeps follow-live until the control stops it.
+
+### Changed
+
+- A plain click in pan mode no longer pauses follow-live on either desktop; the first actual drag movement pauses it, and the Windows and Linux charts share this rule.
+- Manually entered selection ranges crossing midnight are rejected with an explicit same-day explanation on both desktops (previously Linux rejected them with a generic message and the limitation was undocumented).
+
+### Fixed
+
+- Windows: the chart no longer rebuilds pens and looks up theme resources on every rendered frame (render assets are cached per layout and frozen); system-preference changes unrelated to appearance no longer re-apply the theme; post-await startup logic stays inside the guarded startup path; logoff/shutdown run the same stop path as an explicit exit; waiting for report/export work on exit is bounded to 5 seconds; `ExitApplication` can no longer skip `Shutdown` when cleanup throws.
+- Linux: hover movement only repaints when the hovered sample changes; horizontal wheel panning clamps large deltas the same way zooming does.
+- Theme preference saving tolerates unreadable settings files on all platforms and documents the non-atomic overwrite boundary on Unix.
+
 ## [0.2.0] - 2026-10-24
 
 ### Added

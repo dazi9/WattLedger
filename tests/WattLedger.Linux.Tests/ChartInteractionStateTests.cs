@@ -174,4 +174,21 @@ public sealed class ChartInteractionStateTests
         state.PanFrom(samples, dragRange, -60);
         Assert.Equal(dragRange.Pan(-60, ChartSeries.Extent(samples)), state.Viewport);
     }
+
+    [Fact]
+    public void Drag_origin_pan_keeps_follow_live_until_the_control_stops_it()
+    {
+        var samples = Hour();
+        var state = new ChartInteractionState();
+        state.OnSamplesChanged(samples);
+        var dragRange = state.Viewport!.Value;
+        // A press without movement (a plain click) must not pause follow-live…
+        state.PanFrom(samples, dragRange, 0);
+        Assert.True(state.IsFollowingLive);
+        // …the control stops it explicitly once the pointer actually moves.
+        state.StopFollowingLive();
+        state.PanFrom(samples, dragRange, -60);
+        Assert.False(state.IsFollowingLive);
+        Assert.Equal(dragRange.Pan(-60, ChartSeries.Extent(samples)), state.Viewport);
+    }
 }

@@ -43,7 +43,7 @@ public sealed class ThemePreference
         if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
         JsonObject settings;
         try { settings = JsonNode.Parse(File.ReadAllText(FilePath)) as JsonObject ?? new JsonObject(); }
-        catch (Exception ex) when (ex is IOException or JsonException) { settings = new JsonObject(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { settings = new JsonObject(); }
         settings["theme"] = mode.ToString();
         var path = Path.GetFullPath(FilePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -51,6 +51,8 @@ public sealed class ThemePreference
         try
         {
             File.WriteAllText(temporary, settings.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            // overwrite:true is unlink+rename on Unix rather than an atomic replace; a crash in between can drop the
+            // file, which Load already tolerates by defaulting back to System.
             File.Move(temporary, path, overwrite: true);
         }
         finally

@@ -51,6 +51,12 @@ src/WattLedger.Core/
   Reporting/    day reports and CSV/JSON/Markdown exporters
   Models/       immutable records
 
+src/WattLedger.Desktop/ UI-free presentation logic shared by both desktops: chart math and
+                  series, the chart interaction state machine, dashboard loading, refresh
+                  gating and the theme preference. Both desktop projects compile these
+                  files in via <Compile Include>; add every new file to both
+                  WattLedger.App.csproj and WattLedger.Linux.csproj.
+
 src/WattLedger.Cli/   status / watch / today / export / diag
 src/WattLedger.App/   WPF tray app + dashboard
 src/WattLedger.Linux/ Avalonia desktop app for Linux
@@ -97,6 +103,7 @@ Useful cases:
 - 4-space indentation, file-scoped namespaces, `var` when the type is obvious.
 - Prefer immutable records for data crossing layers.
 - Keep platform interop and sensor access in `Core/Native`; do not leak platform APIs into UI code.
+- New chart range/selection/interaction logic belongs in `src/WattLedger.Desktop` as UI-free code with platform-independent unit tests. The platform `PowerChart` controls stay thin event and render adapters and must not re-implement those rules.
 - Use `DateTimeOffset` in the core, UTC milliseconds in SQLite, local time only at the edges.
 
 ## License

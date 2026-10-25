@@ -167,7 +167,7 @@ internal sealed class PowerChart : Control
         // A two-finger horizontal scroll moves the plotted content with the gesture.
         // Prefer the dominant axis so a little diagonal noise does not zoom while panning.
         if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && Math.Abs(e.Delta.X) > Math.Abs(e.Delta.Y))
-            Pan(-e.Delta.X * VisibleRange.Seconds * .1);
+            Pan(-Math.Clamp(e.Delta.X, -5, 5) * VisibleRange.Seconds * .1);
         else if (e.Delta.Y != 0)
             ZoomAt(Math.Pow(.8, Math.Clamp(e.Delta.Y, -5, 5)), (point.X - layout.PlotLeft) / (layout.PlotRight - layout.PlotLeft));
         else return;
@@ -191,7 +191,7 @@ internal sealed class PowerChart : Control
         _dragStart = point;
         _dragRange = VisibleRange;
         _panning = InteractionMode == ChartInteractionMode.Pan || properties.IsMiddleButtonPressed || e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-        IsFollowingLive = false;
+        // Follow-live pauses on the first drag movement below, so a plain click never pauses it.
         ChangedView();
         if (!_panning)
         {
@@ -209,6 +209,9 @@ internal sealed class PowerChart : Control
         var layout = EnsureLayout();
         if (_dragStart is { } drag)
         {
+            var wasFollowing = IsFollowingLive;
+            IsFollowingLive = false;
+            if (wasFollowing) ViewChanged?.Invoke(this, EventArgs.Empty);
             if (_panning)
             {
                 _viewport = _dragRange.Pan(-(point.X - drag.X) / (layout.PlotRight - layout.PlotLeft) * _dragRange.Seconds,
@@ -220,9 +223,12 @@ internal sealed class PowerChart : Control
         }
         var hover = !(_dragStart is not null && _panning) && InPlot(point, layout)
             ? ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange) : null;
-        if (_hover != hover) _hoverText = null;
-        _hover = hover;
-        InvalidateVisual();
+        if (_hover != hover)
+        {
+            _hover = hover;
+            _hoverText = null;
+            InvalidateVisual();
+        }
     }
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {

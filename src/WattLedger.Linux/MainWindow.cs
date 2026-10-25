@@ -368,7 +368,7 @@ internal sealed class MainWindow : Window
         if (!TimeOnly.TryParseExact(_selectionStart.Text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var start) ||
             !TimeOnly.TryParseExact(_selectionEnd.Text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var end) || end <= start)
         {
-            _selectionSummary.Text = "Enter two times as HH:mm or HH:mm:ss, with the end after the start.";
+            _selectionSummary.Text = "Enter two times as HH:mm or HH:mm:ss, with the end after the start. Both times must stay within the same day; ranges crossing midnight are not supported.";
             return;
         }
         var date = _chart.Samples.Count > 0 ? DateOnly.FromDateTime(_chart.Samples[0].Timestamp.LocalDateTime) : DateOnly.FromDateTime(DateTime.Today);

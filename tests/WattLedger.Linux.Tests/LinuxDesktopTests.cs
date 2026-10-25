@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using System.Diagnostics;
@@ -367,6 +368,75 @@ public sealed class LinuxDesktopTests
         {
             await window.DisposeAsync();
             window.Hide();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public void Chart_pan_click_keeps_follow_live_and_drag_with_movement_pauses_it()
+    {
+        var chart = new PowerChart();
+        var window = new Window { Content = chart, Width = 900, Height = 300 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        var baseTime = DateTimeOffset.Now.AddMinutes(-30);
+        chart.Samples = Enumerable.Range(0, 61).Select(i => new PowerPoint(baseTime.AddSeconds(i * 30), 8)).ToArray();
+        chart.InteractionMode = ChartInteractionMode.Pan;
+        var center = chart.TranslatePoint(new(chart.Bounds.Width / 2, chart.Bounds.Height / 2), window)!.Value;
+
+        // A press and release without movement is a plain click and must not pause follow-live.
+        window.MouseMove(center);
+        window.MouseDown(center, MouseButton.Left, RawInputModifiers.None);
+        window.MouseUp(center, MouseButton.Left, RawInputModifiers.None);
+        Assert.True(chart.IsFollowingLive);
+
+        // Dragging with actual movement pauses follow-live.
+        window.MouseDown(center, MouseButton.Left, RawInputModifiers.None);
+        window.MouseMove(center + new Point(120, 0));
+        Assert.False(chart.IsFollowingLive);
+        window.MouseUp(center + new Point(120, 0), MouseButton.Left, RawInputModifiers.None);
+
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Cross_midnight_entered_range_is_rejected_with_an_explanation()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"wattledger-range-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        using var service = new WattLedgerService(Path.Combine(root, "ledger.sqlite"));
+        service.Database.Initialize();
+        var start = new DateTimeOffset(DateTime.Today);
+        for (var i = 0; i < 121; i++)
+            service.Database.InsertSample(new WattLedger.Core.Models.SampleRecord
+            {
+                Timestamp = start.AddSeconds(i * 60),
+                PowerState = "Battery",
+                IsDischarging = true,
+                DischargeMw = 6000,
+                BatteryPercent = 80 - i / 30
+            });
+        var window = new MainWindow(service, false, () => { }, monitorTrayHost: false);
+        try
+        {
+            window.Show();
+            await window.ReportRefreshTask;
+            var controls = Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(window).ToArray();
+            var from = Assert.Single(controls.OfType<TextBox>(), box => box.Name == "SelectionStart");
+            var to = Assert.Single(controls.OfType<TextBox>(), box => box.Name == "SelectionEnd");
+            var calculate = Assert.Single(controls.OfType<Button>(), button => Equals(button.Content, "Calculate"));
+            var summary = Assert.Single(controls.OfType<TextBlock>(), text => text.Name == "SelectionSummary");
+            from.Text = "23:00";
+            to.Text = "01:00";
+            calculate.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Assert.Contains("same day", summary.Text);
+            Assert.Contains("midnight", summary.Text);
+        }
+        finally
+        {
+            await window.DisposeAsync();
+            window.Hide();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(root, recursive: true);
         }
     }

@@ -183,8 +183,12 @@ public partial class MainWindow : Window
         _stopping = true;
         _liveTimer?.Stop();
         _reportTimer?.Stop();
-        try { await Task.WhenAll(_refreshTask, _exportTask); }
-        catch { /* Export/report handlers already surface operation failures. */ }
+        try
+        {
+            // Bounded wait: a stuck export must never block exit; the work is abandoned, not cancelled.
+            await Task.WhenAll(_refreshTask, _exportTask).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch { /* Timeouts and task failures: export/report handlers already surface operation failures. */ }
     }
 
     private async void ExportCsv_Click(object sender, RoutedEventArgs e) => await ExportAsync("csv");
@@ -281,11 +285,15 @@ public partial class MainWindow : Window
     private void UpdateChartRange()
     {
         var range = Chart.VisibleRange;
-        ChartRange.Text = Chart.Samples.Count == 0 ? "No recorded samples today" :
+        var hasSamples = Chart.Samples.Count > 0;
+        var fullRange = !Chart.CanPanEarlier && !Chart.CanPanLater;
+        var boundary = fullRange ? "All today's data fits; zoom in to pan" :
+            !Chart.CanPanEarlier ? "At the earliest recorded data" : !Chart.CanPanLater ? "At the latest recorded data" : "Earlier and later data available";
+        ChartRange.Text = !hasSamples ? "No recorded samples today" :
             $"{range.Start.ToLocalTime():HH:mm:ss} – {range.End.ToLocalTime():HH:mm:ss} · {Chart.Samples.Count:N0} original samples · " +
-            (Chart.IsFollowingLive ? "following live" : "paused view");
-        EarlierButton.IsEnabled = Chart.CanPanEarlier;
-        LaterButton.IsEnabled = Chart.CanPanLater;
+            (Chart.IsFollowingLive ? "following live" : "paused view") + $" · {boundary}";
+        EarlierButton.IsEnabled = hasSamples && Chart.CanPanEarlier;
+        LaterButton.IsEnabled = hasSamples && Chart.CanPanLater;
         FollowButton.Content = Chart.IsFollowingLive ? "Following live ✓" : "Follow live";
     }
     private void UpdateSelectionSummary()
@@ -315,7 +323,7 @@ public partial class MainWindow : Window
         if (!TimeOnly.TryParseExact(SelectionStart.Text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var start) ||
             !TimeOnly.TryParseExact(SelectionEnd.Text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var end) || end <= start)
         {
-            SelectionSummary.Text = "Enter two times as HH:mm or HH:mm:ss, with the end after the start.";
+            SelectionSummary.Text = "Enter two times as HH:mm or HH:mm:ss, with the end after the start. Both times must stay within the same day; ranges crossing midnight are not supported.";
             return;
         }
         var date = Chart.Samples.Count > 0 ? DateOnly.FromDateTime(Chart.Samples[0].Timestamp.LocalDateTime) : DateOnly.FromDateTime(DateTime.Today);
