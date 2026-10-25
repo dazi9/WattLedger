@@ -31,6 +31,8 @@ public partial class App
 
     private void OnSystemThemeChanged(object sender, UserPreferenceChangedEventArgs args)
     {
+        // Only appearance categories matter; wallpaper, mouse speed and similar changes must not re-theme.
+        if (args.Category is not (UserPreferenceCategory.General or UserPreferenceCategory.VisualStyle)) return;
         if (_themeStopped || Dispatcher.HasShutdownStarted) return;
         Dispatcher.BeginInvoke(() =>
         {

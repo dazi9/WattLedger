@@ -20,8 +20,19 @@ public sealed class PowerChart : FrameworkElement
     private Point? _dragStart;
     private ChartTimeRange _dragRange;
     private PowerPoint? _hover;
+    private FormattedText? _hoverText;
+    private FormattedText? _emptyText;
     private bool _panning;
     private HwndSource? _source;
+    // Render assets are rebuilt with the layout (theme changes clear it) and frozen so each frame only draws.
+    private Pen? _gridPen;
+    private Pen? _zeroPen;
+    private Pen? _edgePen;
+    private Pen? _cursorPen;
+    private Pen? _powerPen;
+    private Pen? _batteryPen;
+    private Brush? _selectionFill;
+    private Brush? _hoverBackBrush;
 
     public PowerChart()
     {
@@ -93,11 +104,12 @@ public sealed class PowerChart : FrameworkElement
         _state.ZoomAt(_samples, factor, anchor);
         ChangedView();
     }
-    public void InvalidateTheme() { _layout = null; InvalidateVisual(); }
+    public void InvalidateTheme() { _layout = null; _hoverText = null; _emptyText = null; InvalidateVisual(); }
     private void ChangedView()
     {
         _layout = null;
         _hover = null;
+        _hoverText = null;
         ViewChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
@@ -108,7 +120,7 @@ public sealed class PowerChart : FrameworkElement
         var layout = EnsureLayout();
         var point = e.GetPosition(this);
         if (!InPlot(point, layout)) return;
-        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) Pan(-e.Delta / 120d * VisibleRange.Seconds * .1);
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) Pan(-Math.Clamp(e.Delta / 120d, -5, 5) * VisibleRange.Seconds * .1);
         else ZoomAt(Math.Pow(.8, Math.Clamp(e.Delta / 120d, -5, 5)),
             (point.X - layout.PlotLeft) / (layout.PlotRight - layout.PlotLeft));
         e.Handled = true;
@@ -122,7 +134,7 @@ public sealed class PowerChart : FrameworkElement
         var point = PointFromScreen(new Point((short)(packed & 0xffff), (short)((packed >> 16) & 0xffff)));
         if (!InPlot(point, EnsureLayout())) return IntPtr.Zero;
         // WM_MOUSEHWHEEL positive means scroll right, unlike Avalonia's content-motion delta.
-        var delta = (short)((wParam.ToInt64() >> 16) & 0xffff) / 120d;
+        var delta = Math.Clamp((short)((wParam.ToInt64() >> 16) & 0xffff) / 120d, -5, 5);
         Pan(delta * VisibleRange.Seconds * .1);
         handled = true;
         return IntPtr.Zero;
@@ -139,7 +151,7 @@ public sealed class PowerChart : FrameworkElement
         if (e.ClickCount == 2 && e.ChangedButton == MouseButton.Left) { ResetView(); e.Handled = true; return; }
         _dragStart = point;
         _dragRange = VisibleRange;
-        _state.StopFollowingLive();
+        // Follow-live pauses on the first drag movement below, so a plain click never pauses it.
         ViewChanged?.Invoke(this, EventArgs.Empty);
         _panning = _state.DecidePan(InteractionMode, e.ChangedButton == MouseButton.Middle,
             Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
@@ -159,9 +171,14 @@ public sealed class PowerChart : FrameworkElement
         var layout = EnsureLayout();
         if (_dragStart is { } drag)
         {
+            if (_state.IsFollowingLive)
+            {
+                // First actual movement pauses follow-live; a press without movement keeps following.
+                _state.StopFollowingLive();
+                ViewChanged?.Invoke(this, EventArgs.Empty);
+            }
             if (_panning)
             {
-                _state.StopFollowingLive();
                 _state.PanFrom(_samples, _dragRange,
                     -(point.X - drag.X) / (layout.PlotRight - layout.PlotLeft) * _dragRange.Seconds);
                 ChangedView();
@@ -173,8 +190,10 @@ public sealed class PowerChart : FrameworkElement
                 InvalidateVisual();
             }
         }
-        _hover = !(_dragStart is not null && _panning) && InPlot(point, layout)
+        var hover = !(_dragStart is not null && _panning) && InPlot(point, layout)
             ? ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange) : null;
+        if (_hover != hover) _hoverText = null;
+        _hover = hover;
         InvalidateVisual();
     }
     protected override void OnMouseUp(MouseButtonEventArgs e)
@@ -186,7 +205,7 @@ public sealed class PowerChart : FrameworkElement
         e.Handled = true;
     }
     protected override void OnLostMouseCapture(MouseEventArgs e) { base.OnLostMouseCapture(e); _dragStart = null; }
-    protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); _hover = null; InvalidateVisual(); }
+    protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); _hover = null; _hoverText = null; InvalidateVisual(); }
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -209,14 +228,14 @@ public sealed class PowerChart : FrameworkElement
         base.OnRender(context);
         if (ActualWidth < 150 || ActualHeight < 70) return;
         var layout = EnsureLayout();
+        var gridPen = _gridPen!;
         context.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
-        var gridPen = new Pen(Resource("ChartGridBrush", "BorderBrush"), 1);
         for (var i = 0; i <= 5; i++)
         {
             var y = layout.PlotTop + (layout.PlotBottom - layout.PlotTop) * i / 5;
             context.DrawLine(gridPen, new Point(layout.PlotLeft, y), new Point(layout.PlotRight, y));
         }
-        context.DrawLine(new Pen(Resource("ChartZeroBrush", "MutedBrush"), 1.2),
+        context.DrawLine(_zeroPen!,
             new Point(layout.PlotLeft, layout.ZeroY), new Point(layout.PlotRight, layout.ZeroY));
         foreach (var tick in layout.TimeTicks)
             context.DrawLine(gridPen, new Point(tick.X, layout.PlotTop), new Point(tick.X, layout.PlotBottom));
@@ -229,17 +248,14 @@ public sealed class PowerChart : FrameworkElement
         {
             var left = XAt(selection.Start, layout);
             var right = XAt(selection.End, layout);
-            var blue = Resource("ChartBatteryBrush", "BlueBrush");
-            var fill = Resource("ChartSelectionBrush", "BlueBrush").CloneCurrentValue();
-            if (TryFindResource("ChartSelectionBrush") is null) fill.Opacity = .18;
-            context.DrawRectangle(fill, null, new Rect(left, layout.PlotTop, Math.Max(0, right - left), layout.PlotBottom - layout.PlotTop));
-            context.DrawLine(new Pen(blue, 1), new Point(left, layout.PlotTop), new Point(left, layout.PlotBottom));
-            context.DrawLine(new Pen(blue, 1), new Point(right, layout.PlotTop), new Point(right, layout.PlotBottom));
+            context.DrawRectangle(_selectionFill!, null, new Rect(left, layout.PlotTop, Math.Max(0, right - left), layout.PlotBottom - layout.PlotTop));
+            context.DrawLine(_edgePen!, new Point(left, layout.PlotTop), new Point(left, layout.PlotBottom));
+            context.DrawLine(_edgePen!, new Point(right, layout.PlotTop), new Point(right, layout.PlotBottom));
         }
         if (_hover is { } hover)
         {
             var x = XAt(hover.Timestamp, layout);
-            context.DrawLine(new Pen(Resource("MutedBrush"), 1) { DashStyle = DashStyles.Dot },
+            context.DrawLine(_cursorPen!,
                 new Point(x, layout.PlotTop), new Point(x, layout.PlotBottom));
         }
         context.Pop();
@@ -247,13 +263,13 @@ public sealed class PowerChart : FrameworkElement
         {
             var power = hovered.Watts is { } watts ? $"{watts:+0.00;-0.00;0.00} W" : "power unavailable";
             var percent = hovered.BatteryPercent is { } battery ? $"{battery}%" : "battery unavailable";
-            var text = Text($"{hovered.Timestamp.ToLocalTime():MM-dd HH:mm:ss} · {power} · {percent}", 11);
+            var text = _hoverText ??= Text($"{hovered.Timestamp.ToLocalTime():MM-dd HH:mm:ss} · {power} · {percent}", 11);
             var x = Math.Max(layout.PlotLeft, Math.Min(XAt(hovered.Timestamp, layout) + 10, ActualWidth - text.Width - 12));
-            context.DrawRoundedRectangle(Resource("ChartHoverBrush", "CardBrush"), null,
+            context.DrawRoundedRectangle(_hoverBackBrush!, null,
                 new Rect(x - 5, layout.PlotTop + 4, text.Width + 10, text.Height + 8), 4, 4);
             context.DrawText(text, new Point(x, layout.PlotTop + 8));
         }
-        if (layout.ActualStart is null) context.DrawText(Text("No samples in this range", 12), new Point(layout.PlotLeft + 10, layout.PlotTop + 12));
+        if (layout.ActualStart is null) context.DrawText(_emptyText ??= Text("No samples in this range", 12), new Point(layout.PlotLeft + 10, layout.PlotTop + 12));
     }
 
     private PowerChartLayout EnsureLayout()
@@ -278,18 +294,26 @@ public sealed class PowerChart : FrameworkElement
         }
         var power = Resource("ChartPowerBrush", "GreenBrush");
         var battery = Resource("ChartBatteryBrush", "BlueBrush");
-        var area = power.CloneCurrentValue(); area.Opacity = .16;
-        var powerPen = new Pen(power, 2.2) { LineJoin = PenLineJoin.Round };
-        var batteryPen = new Pen(battery, 1.6) { DashStyle = DashStyles.Dash };
+        var area = power.CloneCurrentValue(); area.Opacity = .16; area.Freeze();
+        _powerPen = new Pen(power, 2.2) { LineJoin = PenLineJoin.Round }; _powerPen.Freeze();
+        _batteryPen = new Pen(battery, 1.6) { DashStyle = DashStyles.Dash }; _batteryPen.Freeze();
+        _gridPen = new Pen(Resource("ChartGridBrush", "BorderBrush"), 1); _gridPen.Freeze();
+        _zeroPen = new Pen(Resource("ChartZeroBrush", "MutedBrush"), 1.2); _zeroPen.Freeze();
+        _edgePen = new Pen(battery, 1); _edgePen.Freeze();
+        _cursorPen = new Pen(Resource("MutedBrush"), 1) { DashStyle = DashStyles.Dot }; _cursorPen.Freeze();
+        _selectionFill = Resource("ChartSelectionBrush", "BlueBrush").CloneCurrentValue();
+        if (TryFindResource("ChartSelectionBrush") is null) _selectionFill.Opacity = .18;
+        _selectionFill.Freeze();
+        _hoverBackBrush = Resource("ChartHoverBrush", "CardBrush");
         foreach (var run in layout.PowerRuns)
         {
             if (run.Points.Count == 1) _dots.Add((power, PointAt(run.Points[0]), 3.5));
-            else { _geometry.Add((area, null, Geometry(run.Points, layout.ZeroY))); _geometry.Add((null, powerPen, Geometry(run.Points))); }
+            else { _geometry.Add((area, null, Geometry(run.Points, layout.ZeroY))); _geometry.Add((null, _powerPen, Geometry(run.Points))); }
         }
         foreach (var run in layout.BatteryRuns)
         {
             if (run.Count == 1) _dots.Add((battery, PointAt(run[0]), 2.5));
-            else _geometry.Add((null, batteryPen, Geometry(run)));
+            else _geometry.Add((null, _batteryPen, Geometry(run)));
         }
         return layout;
     }

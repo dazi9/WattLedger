@@ -53,16 +53,29 @@ public partial class App : Application
 
             // App owns startup, including when --tray never raises Window.Loaded.
             _startupTask = new SamplerStartup(() => _service.StartAsync(), ReportStartupFailure).StartAsync();
-            if (await _startupTask && !_exiting)
-            {
-                SystemEvents.PowerModeChanged += OnPowerModeChanged;
-            }
+            await ContinueStartupAsync(_startupTask);
         }
         catch (Exception ex)
         {
             ReportStartupFailure(ex);
             ExitApplication();
         }
+    }
+
+    // Post-await startup logic lives here so OnStartup's try/catch keeps covering future additions.
+    private async Task ContinueStartupAsync(Task<bool> startupTask)
+    {
+        if (await startupTask && !_exiting)
+        {
+            SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        }
+    }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        base.OnSessionEnding(e);
+        // Logoff/shutdown run the same stop path as an explicit exit instead of skipping cleanup.
+        ExitApplication();
     }
 
     private void ReportStartupFailure(Exception error)
@@ -88,10 +101,17 @@ public partial class App : Application
     {
         if (_exiting) return;
         _exiting = true;
-        // Finish database readers before disposing the shared service on shutdown.
-        if (_window is not null) await _window.StopBackgroundWorkAsync();
-        _window?.AllowClose();
-        _window?.Close();
+        try
+        {
+            // Finish database readers before disposing the shared service on shutdown.
+            if (_window is not null) await _window.StopBackgroundWorkAsync();
+            _window?.AllowClose();
+            _window?.Close();
+        }
+        catch
+        {
+            // A cleanup failure must not leave the process alive.
+        }
         Shutdown();
     }
 

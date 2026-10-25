@@ -42,6 +42,8 @@ internal sealed class DashboardDataLoader(WattLedgerService service)
         _lastRead = now;
         _loadedVersion = version;
 
+        // Precondition: sessions never overlap and the OrderBy(Start) makes gaps strictly ordered, so the single
+        // cursor below is correct — the first gap ending after the previous sample is the only candidate.
         var gaps = report.Sessions.Where(s => s.Type is "SleepGap" or "ModernStandby")
             .OrderBy(s => s.Start).ToArray();
         var points = new PowerPoint[_samples.Count];

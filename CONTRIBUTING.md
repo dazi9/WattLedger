@@ -51,6 +51,12 @@ src/WattLedger.Core/
   Reporting/    day reports and CSV/JSON/Markdown exporters
   Models/       immutable records
 
+src/WattLedger.Desktop/ UI-free presentation logic shared by both desktops: chart math and
+                  series, the chart interaction state machine, dashboard loading, refresh
+                  gating and the theme preference. Both desktop projects compile these
+                  files in via <Compile Include>; add every new file to both
+                  WattLedger.App.csproj and WattLedger.Linux.csproj.
+
 src/WattLedger.Cli/   status / watch / today / export / diag
 src/WattLedger.App/   WPF tray app + dashboard
 src/WattLedger.Linux/ Avalonia desktop app for Linux
@@ -60,11 +66,12 @@ tests/                unit tests for the energy and session engines
 ## Pull requests
 
 1. Open an issue first for non-trivial changes (new sensors, schema changes, UI redesign).
-2. Keep PRs focused. One concern per PR.
-3. Add tests for energy math and session-state changes.
-4. Update `docs/METHODOLOGY.md` if you change a measurement or formula.
-5. Include a screenshot for UI changes.
-6. Run `dotnet build` and `dotnet test` before pushing.
+2. Name your branch `<github-username>/<topic>` (for example `dazi9/chart-navigation`) so each contributor's work is grouped under their own name.
+3. Keep PRs focused. One concern per PR.
+4. Add tests for energy math and session-state changes.
+5. Update `docs/METHODOLOGY.md` if you change a measurement or formula.
+6. Include a screenshot for UI changes.
+7. Run `dotnet build` and `dotnet test` before pushing.
 
 ## Hardware reports
 
@@ -97,6 +104,7 @@ Useful cases:
 - 4-space indentation, file-scoped namespaces, `var` when the type is obvious.
 - Prefer immutable records for data crossing layers.
 - Keep platform interop and sensor access in `Core/Native`; do not leak platform APIs into UI code.
+- New chart range/selection/interaction logic belongs in `src/WattLedger.Desktop` as UI-free code with platform-independent unit tests. The platform `PowerChart` controls stay thin event and render adapters and must not re-implement those rules.
 - Use `DateTimeOffset` in the core, UTC milliseconds in SQLite, local time only at the edges.
 
 ## License
