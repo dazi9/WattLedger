@@ -66,11 +66,12 @@ tests/                unit tests for the energy and session engines
 ## Pull requests
 
 1. Open an issue first for non-trivial changes (new sensors, schema changes, UI redesign).
-2. Keep PRs focused. One concern per PR.
-3. Add tests for energy math and session-state changes.
-4. Update `docs/METHODOLOGY.md` if you change a measurement or formula.
-5. Include a screenshot for UI changes.
-6. Run `dotnet build` and `dotnet test` before pushing.
+2. Name your branch `<github-username>/<topic>` (for example `dazi9/chart-navigation`) so each contributor's work is grouped under their own name.
+3. Keep PRs focused. One concern per PR.
+4. Add tests for energy math and session-state changes.
+5. Update `docs/METHODOLOGY.md` if you change a measurement or formula.
+6. Include a screenshot for UI changes.
+7. Run `dotnet build` and `dotnet test` before pushing.
 
 ## Hardware reports
 

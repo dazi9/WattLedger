@@ -12,12 +12,14 @@ The first PR is a validation gate: confirm the package/API versions, native Wayl
 
 ## Separate branches and PRs
 
+Branches are named `<github-username>/<topic>` so each contributor's work is grouped under their own name.
+
 | Order | Proposed branch | Deliverable and acceptance criteria |
 |---|---|---|
-| 1 | `codex/native-wayland` | Upgrade/validate the backend; isolate desktop integration; explicit Wayland/X11 selection with actionable startup errors. Validate GNOME and KDE on representative Debian/Ubuntu and Fedora systems, including fractional scaling, clipboard, tray availability and restore. Record tested distribution versions and native dependencies; provide reproducible packages and an X11 compatibility path. |
-| 2 | `codex/chart-navigation` | Resolve the reported inability to slide the chart left/right. Provide discoverable pan/select modes, ordinary mouse dragging and horizontal touchpad scrolling; keep zoom anchored to the pointer and permit navigating available history. Add follow-live/reset controls and clear range limits. Share range/selection calculations and specify identical mouse, keyboard and touchpad behavior for both desktop clients. Verify real compositor input as well as automated gestures. |
-| 3 | `codex/theme-modes` | Light, dark and system modes with persisted preference and live system-theme updates. Replace fixed colors with semantic resources, including chart grid, axes, selection and tooltips; verify contrast and exports in both themes. |
-| 4 | `codex/windows-behavior-parity` | Apply the shared chart interaction, selection statistics, theme settings and error/status behavior to Windows. Align startup/lease conflict handling, tray restore, export and missing/sleep-data presentation. Preserve platform-specific sensor capabilities and test the WPF tray path on Windows. |
+| 1 | `dazi9/native-wayland` | Upgrade/validate the backend; isolate desktop integration; explicit Wayland/X11 selection with actionable startup errors. Validate GNOME and KDE on representative Debian/Ubuntu and Fedora systems, including fractional scaling, clipboard, tray availability and restore. Record tested distribution versions and native dependencies; provide reproducible packages and an X11 compatibility path. |
+| 2 | `dazi9/chart-navigation` | Resolve the reported inability to slide the chart left/right. Provide discoverable pan/select modes, ordinary mouse dragging and horizontal touchpad scrolling; keep zoom anchored to the pointer and permit navigating available history. Add follow-live/reset controls and clear range limits. Share range/selection calculations and specify identical mouse, keyboard and touchpad behavior for both desktop clients. Verify real compositor input as well as automated gestures. |
+| 3 | `dazi9/theme-modes` | Light, dark and system modes with persisted preference and live system-theme updates. Replace fixed colors with semantic resources, including chart grid, axes, selection and tooltips; verify contrast and exports in both themes. |
+| 4 | `dazi9/windows-behavior-parity` | Apply the shared chart interaction, selection statistics, theme settings and error/status behavior to Windows. Align startup/lease conflict handling, tray restore, export and missing/sleep-data presentation. Preserve platform-specific sensor capabilities and test the WPF tray path on Windows. |
 
 Each implementation PR should include its own focused tests, screenshots where applicable, and an updated validation record. Use shared presentation contracts rather than adding UI dependencies to the measurement core. Do not claim support for untested distributions or native Windows interactions based only on cross-compilation.
 
