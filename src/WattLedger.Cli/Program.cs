@@ -4,6 +4,7 @@ using Spectre.Console;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
 using WattLedger.Core.Reporting;
+using WattLedger.Core.Time;
 
 namespace WattLedger.Cli;
 
@@ -188,13 +189,12 @@ internal static class Program
             ? Path.GetFullPath(path)
             : Path.GetFullPath($"wattledger-{date:yyyy-MM-dd}.{extension}");
 
-        var localStart = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local));
-        var localEnd = localStart.AddDays(1);
+        var (localStart, localEnd) = LocalDay.Range(date);
 
         switch (format)
         {
             case "csv":
-                var samples = service.GetSamples(localStart, localEnd);
+                var samples = service.GetSamples(localStart, localEnd.AddTicks(-1));
                 ReportBuilder.ExportCsv(samples, output);
                 break;
             case "json":

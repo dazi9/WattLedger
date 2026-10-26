@@ -1,6 +1,6 @@
 # Windows desktop behavior parity
 
-The WPF client now uses the same `WattLedger.Desktop` source files as Linux for original samples, signed power, missing/sleep gaps, chart layout, range integration and incremental dashboard reads. The shared files have no UI-framework dependency.
+The WPF client now uses the same `WattLedger.Desktop` source files as Linux for original samples, signed power, missing/sleep gaps, chart layout, range integration, the chart interaction state machine and incremental dashboard reads. Both platform `PowerChart` controls are event/render adapters over `ChartInteractionState`. The shared files have no UI-framework dependency.
 
 - Live cards, tray values and chart use positive watts for discharge and negative watts for charging. Unknown power is not replaced by a measured zero; unknown battery state is explicit.
 - Charts initially follow the latest 30 minutes. Pan is the default left-drag mode; Select points enables endpoint selection. Horizontal wheel messages, Shift+wheel, arrow keys and Earlier/Later buttons pan; vertical wheel and +/- zoom. Home/Fit today pauses on the current full extent; End/Follow live resumes tracking. A paused viewport stays fixed as data arrives.

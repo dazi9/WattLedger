@@ -11,6 +11,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Reporting;
+using WattLedger.Core.Time;
 using WattLedger.Desktop;
 
 namespace WattLedger.App;
@@ -213,7 +214,7 @@ public partial class MainWindow : Window
             {
                 if (format == "csv")
                 {
-                    var start = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local));
+                    var start = LocalDay.Start(date);
                     ReportBuilder.ExportCsv(_service.GetSamples(start, end), path);
                 }
                 else if (format == "json") ReportBuilder.ExportJson(_service.GetReport(date), path);

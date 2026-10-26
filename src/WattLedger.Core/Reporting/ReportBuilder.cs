@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using WattLedger.Core.Models;
 using WattLedger.Core.Storage;
+using WattLedger.Core.Time;
 
 namespace WattLedger.Core.Reporting;
 
@@ -26,12 +27,14 @@ public static class ReportBuilder
 {
     public static DayReport BuildDay(LedgerDatabase database, DateOnly date)
     {
-        var localStart = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local);
-        var start = new DateTimeOffset(localStart);
-        var end = start.AddDays(1);
+        var (start, end) = LocalDay.Range(date);
 
+        // GetSessions returns every session overlapping the day. Clip each one to the local
+        // calendar day so a session crossing midnight is split and never counted twice.
         var sessions = database.GetSessions(start, end)
-            .Where(s => s.DurationSeconds > 0)
+            .Select(session => SessionSlicer.Clip(session, start, end))
+            .Where(session => session is { DurationSeconds: > 0 })
+            .Select(session => session!)
             .ToArray();
         var activeSessions = sessions.Where(s => s.Type == "Battery").ToArray();
         var standbySessions = sessions.Where(s => s.Type is "ModernStandby" or "SleepGap").ToArray();
@@ -46,7 +49,7 @@ public static class ReportBuilder
         var standbySeconds = standbySessions.Sum(s => s.DurationSeconds);
         var acSeconds = acSessions.Sum(s => s.DurationSeconds);
 
-        var latest = database.GetLatestSample(start, end);
+        var latest = database.GetLatestSample(start, end.AddTicks(-1));
 
         return new DayReport
         {
