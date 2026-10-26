@@ -11,6 +11,7 @@ using Avalonia.Threading;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
 using WattLedger.Core.Reporting;
+using WattLedger.Core.Time;
 
 namespace WattLedger.Linux;
 
@@ -954,7 +955,7 @@ internal sealed class MainWindow : Window
                 switch (format)
                 {
                     case "csv":
-                        var start = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local));
+                        var start = LocalDay.Start(date);
                         ReportBuilder.ExportCsv(_service.GetSamples(start, now), path);
                         break;
                     case "md":

@@ -1,6 +1,7 @@
 using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
 using WattLedger.Core.Reporting;
+using WattLedger.Core.Time;
 
 namespace WattLedger.Desktop;
 
@@ -19,7 +20,7 @@ internal sealed class DashboardDataLoader(WattLedgerService service)
 
     public DashboardSnapshot Load(DateTimeOffset now)
     {
-        var date = DateOnly.FromDateTime(now.LocalDateTime);
+        var date = LocalDay.DateOf(now);
         var version = Volatile.Read(ref _invalidation);
         if (_date != date || now < _lastRead || version != _loadedVersion)
         {
@@ -27,7 +28,7 @@ internal sealed class DashboardDataLoader(WattLedgerService service)
             _date = date;
         }
 
-        var start = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local));
+        var start = LocalDay.Start(date);
         // Re-read the last timestamp: SQLite stores milliseconds and multiple rows may share one.
         var from = _samples.Count == 0 ? start : _samples[^1].Timestamp;
         var incoming = service.GetSamples(from, now);

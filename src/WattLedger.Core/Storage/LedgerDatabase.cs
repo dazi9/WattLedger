@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using WattLedger.Core.Models;
+using WattLedger.Core.Time;
 
 namespace WattLedger.Core.Storage;
 
@@ -376,47 +377,52 @@ public sealed class LedgerDatabase
 
     public IReadOnlyList<DailySummary> GetDailySummaries(DateTimeOffset from, DateTimeOffset to)
     {
-        using var connection = Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT date(start_ts / 1000, 'unixepoch', 'localtime') AS day,
-                   SUM(CASE WHEN type = 'Battery' AND energy_wh > 0 THEN energy_wh ELSE 0 END) AS active_wh,
-                   SUM(CASE WHEN type IN ('ModernStandby', 'SleepGap') AND energy_wh > 0 THEN energy_wh ELSE 0 END) AS standby_wh,
-                   SUM(CASE WHEN energy_wh < 0 THEN -energy_wh ELSE 0 END) AS charge_wh,
-                   SUM(CASE WHEN type = 'Battery' THEN duration_seconds ELSE 0 END) AS active_seconds,
-                   SUM(CASE WHEN type IN ('ModernStandby', 'SleepGap') THEN duration_seconds ELSE 0 END) AS standby_seconds,
-                   SUM(CASE WHEN type IN ('ModernStandby', 'SleepGap') AND note LIKE '%battery energy unavailable%' THEN 1 ELSE 0 END) AS standby_energy_incomplete
-            FROM sessions
-            WHERE end_ts >= $from AND start_ts <= $to
-            GROUP BY day
-            ORDER BY day;
-            """;
-        command.Parameters.AddWithValue("$from", from.ToUnixTimeMilliseconds());
-        command.Parameters.AddWithValue("$to", to.ToUnixTimeMilliseconds());
-
-        var results = new List<DailySummary>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
+        if (to <= from)
         {
-            var dayText = reader.GetString(0);
-            if (!DateOnly.TryParseExact(dayText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+            return Array.Empty<DailySummary>();
+        }
+
+        var byDay = new Dictionary<DateOnly, DailyAccumulator>();
+        foreach (var session in GetSessions(from, to))
+        {
+            var sessionStart = session.Start < from ? from : session.Start;
+            var sessionEnd = session.End > to ? to : session.End;
+            if (sessionEnd <= sessionStart)
             {
                 continue;
             }
 
-            results.Add(new DailySummary
+            // Bucket the overlapping part of each session by local calendar day. The session is
+            // clipped again per day so a session crossing midnight is split instead of being
+            // attributed wholly to its start date.
+            var firstDay = LocalDay.DateOf(sessionStart);
+            var lastDay = LocalDay.DateOf(sessionEnd.AddTicks(-1));
+            for (var day = firstDay; day.CompareTo(lastDay) <= 0; day = day.AddDays(1))
             {
-                Date = day,
-                ActiveWh = reader.GetDouble(1),
-                StandbyWh = reader.GetDouble(2),
-                ChargeWh = reader.GetDouble(3),
-                ActiveSeconds = reader.GetDouble(4),
-                StandbySeconds = reader.GetDouble(5),
-                StandbyEnergyIncomplete = reader.GetInt64(6) > 0
-            });
+                var (dayStart, dayEnd) = LocalDay.Range(day);
+                var slice = SessionSlicer.Clip(
+                    session,
+                    dayStart < from ? from : dayStart,
+                    dayEnd > to ? to : dayEnd);
+                if (slice is not { DurationSeconds: > 0 })
+                {
+                    continue;
+                }
+
+                if (!byDay.TryGetValue(day, out var accumulator))
+                {
+                    accumulator = new DailyAccumulator();
+                    byDay[day] = accumulator;
+                }
+
+                accumulator.Add(slice);
+            }
         }
 
-        return results;
+        return byDay
+            .OrderBy(entry => entry.Key)
+            .Select(entry => entry.Value.ToSummary(entry.Key))
+            .ToArray();
     }
 
     public long GetSampleCount()
@@ -464,19 +470,67 @@ public sealed class LedgerDatabase
 
     private static IReadOnlyList<SampleRecord> Decimate(List<SampleRecord> samples, int maxPoints)
     {
-        var result = new List<SampleRecord>(maxPoints + 1);
-        var step = (double)samples.Count / maxPoints;
-        for (var i = 0; i < maxPoints; i++)
+        if (maxPoints <= 0 || samples.Count <= maxPoints)
         {
-            result.Add(samples[(int)(i * step)]);
+            return samples;
         }
 
-        if (result.Count == 0 || !ReferenceEquals(result[^1], samples[^1]))
+        if (maxPoints == 1)
         {
-            result.Add(samples[^1]);
+            return [samples[^1]];
         }
 
+        var result = new List<SampleRecord>(maxPoints);
+        var step = (samples.Count - 1) / (double)(maxPoints - 1);
+        for (var i = 0; i < maxPoints - 1; i++)
+        {
+            result.Add(samples[(int)Math.Round(i * step)]);
+        }
+
+        result.Add(samples[^1]);
         return result;
+    }
+
+    private sealed class DailyAccumulator
+    {
+        private double _activeWh;
+        private double _standbyWh;
+        private double _chargeWh;
+        private double _activeSeconds;
+        private double _standbySeconds;
+        private bool _standbyEnergyIncomplete;
+
+        public void Add(SessionRecord session)
+        {
+            var isStandby = session.Type is "ModernStandby" or "SleepGap";
+            if (session.Type == "Battery")
+            {
+                _activeSeconds += session.DurationSeconds;
+                if (session.EnergyWh > 0) _activeWh += session.EnergyWh;
+            }
+            else if (isStandby)
+            {
+                _standbySeconds += session.DurationSeconds;
+                if (session.EnergyWh > 0) _standbyWh += session.EnergyWh;
+                if (session.Note?.Contains("battery energy unavailable", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    _standbyEnergyIncomplete = true;
+                }
+            }
+
+            if (session.EnergyWh < 0) _chargeWh -= session.EnergyWh;
+        }
+
+        public DailySummary ToSummary(DateOnly date) => new()
+        {
+            Date = date,
+            ActiveWh = _activeWh,
+            StandbyWh = _standbyWh,
+            ChargeWh = _chargeWh,
+            ActiveSeconds = _activeSeconds,
+            StandbySeconds = _standbySeconds,
+            StandbyEnergyIncomplete = _standbyEnergyIncomplete
+        };
     }
 
     private static SampleRecord ReadSample(SqliteDataReader reader)

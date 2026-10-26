@@ -20,8 +20,8 @@ internal sealed class PowerChart : Control
     private static readonly IPen BatteryPen = new Pen(BatteryBrush, 1.6, dashStyle: DashStyle.Dash);
     private static readonly IPen CursorPen = new Pen(LabelBrush, 1, dashStyle: DashStyle.Dot);
     private static readonly IBrush AreaBrush = ThemeResources.ChartAreaBrush;
+    private readonly ChartInteractionState _state = new();
     private PowerPoint[] _samples = [];
-    private ChartTimeRange? _viewport;
     private PowerChartLayout? _layout;
     private Size _layoutSize;
     private readonly List<(IBrush? Fill, IPen? Pen, StreamGeometry Geometry)> _geometry = [];
@@ -31,10 +31,8 @@ internal sealed class PowerChart : Control
     private FormattedText? _hoverText;
     private Point? _dragStart;
     private ChartTimeRange _dragRange;
-    private DateTimeOffset? _selectionAnchor;
     private bool _panning;
     private ChartInteractionMode _interactionMode;
-    private double _followWindowSeconds = 30 * 60;
 
     public PowerChart()
     {
@@ -51,10 +49,10 @@ internal sealed class PowerChart : Control
 
     public event EventHandler? SelectionChanged;
     public event EventHandler? ViewChanged;
-    public ChartSelectionStatistics? Selection { get; private set; }
+    public ChartSelectionStatistics? Selection => _state.Selection;
     public ChartTimeRange DataRange => ChartSeries.Extent(_samples);
-    public ChartTimeRange VisibleRange => _viewport ?? DataRange;
-    public bool IsFollowingLive { get; private set; } = true;
+    public ChartTimeRange VisibleRange => _state.VisibleRange(_samples);
+    public bool IsFollowingLive => _state.IsFollowingLive;
     public bool CanPanEarlier => VisibleRange.Start > DataRange.Start;
     public bool CanPanLater => VisibleRange.End < DataRange.End;
     public ChartInteractionMode InteractionMode
@@ -75,20 +73,13 @@ internal sealed class PowerChart : Control
         set
         {
             _samples = ChartSeries.Normalize(value);
-            var extent = DataRange;
-            if (_viewport is { } prior && (prior.End < extent.Start || prior.Start > extent.End))
+            var selectionBefore = _state.Selection;
+            _state.OnSamplesChanged(_samples);
+            if (!ReferenceEquals(selectionBefore, _state.Selection))
             {
-                IsFollowingLive = true;
-                _followWindowSeconds = 30 * 60;
+                SelectionChanged?.Invoke(this, EventArgs.Empty);
             }
-            if (IsFollowingLive) _viewport = LatestRange(extent, _followWindowSeconds);
-            else if (_viewport is { } view) _viewport = view.Pan(0, extent);
-            if (Selection is { } selection)
-            {
-                if (_samples.Length == 0 || selection.End < _samples[0].Timestamp || selection.Start > _samples[^1].Timestamp)
-                    ClearSelection();
-                else SelectRange(selection.Start, selection.End);
-            }
+
             _hover = null;
             _hoverText = null;
             ChangedView();
@@ -98,55 +89,44 @@ internal sealed class PowerChart : Control
     public void Zoom(double factor) => ZoomAt(factor, .5);
     public void ResetView()
     {
-        IsFollowingLive = false;
-        _viewport = DataRange;
+        _state.ResetView(_samples);
         ChangedView();
     }
     public void FollowLive()
     {
-        var extent = DataRange;
-        _followWindowSeconds = VisibleRange.Seconds >= extent.Seconds ? 30 * 60 : VisibleRange.Seconds;
-        IsFollowingLive = true;
-        _viewport = LatestRange(extent, _followWindowSeconds);
+        _state.FollowLive(_samples);
         ChangedView();
     }
     public void Pan(double seconds)
     {
         if (!double.IsFinite(seconds)) return;
-        IsFollowingLive = false;
-        _viewport = VisibleRange.Pan(seconds, DataRange);
+        _state.Pan(_samples, seconds);
         ChangedView();
     }
-    private static ChartTimeRange LatestRange(ChartTimeRange extent, double seconds) =>
-        new(extent.End.AddSeconds(-Math.Min(seconds, extent.Seconds)), extent.End);
     private void UpdateCursor() => Cursor = new Cursor(
         InteractionMode == ChartInteractionMode.Pan ? StandardCursorType.SizeAll : StandardCursorType.Cross);
 
     public void ClearSelection()
     {
-        Selection = null;
-        _selectionAnchor = null;
+        _state.ClearSelection();
         SelectionChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
     public void SelectRange(DateTimeOffset start, DateTimeOffset end)
     {
-        Selection = ChartSeries.Summarize(_samples, start, end);
+        _state.SelectRange(_samples, start, end);
         SelectionChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
     public void ZoomToSelection()
     {
-        if (Selection is not { DurationSeconds: > 0 } selected) return;
-        var range = new ChartTimeRange(selected.Start, selected.End);
-        IsFollowingLive = false;
-        _viewport = range.Zoom(1, .5, ChartSeries.Extent(_samples));
+        if (Selection is not { DurationSeconds: > 0 }) return;
+        _state.ZoomToSelection(_samples);
         ChangedView();
     }
     private void ZoomAt(double factor, double anchor)
     {
-        IsFollowingLive = false;
-        _viewport = VisibleRange.Zoom(factor, anchor, ChartSeries.Extent(_samples));
+        _state.ZoomAt(_samples, factor, anchor);
         ChangedView();
     }
     private void ChangedView()
@@ -190,14 +170,14 @@ internal sealed class PowerChart : Control
         }
         _dragStart = point;
         _dragRange = VisibleRange;
-        _panning = InteractionMode == ChartInteractionMode.Pan || properties.IsMiddleButtonPressed || e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        _panning = _state.DecidePan(_interactionMode, properties.IsMiddleButtonPressed,
+            e.KeyModifiers.HasFlag(KeyModifiers.Shift));
         // Follow-live pauses on the first drag movement below, so a plain click never pauses it.
-        ChangedView();
         if (!_panning)
         {
-            _selectionAnchor = ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange)?.Timestamp;
-            if (_selectionAnchor is { } anchor) SelectRange(anchor, anchor);
-            else ClearSelection();
+            _state.BeginSelection(_samples, ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange)?.Timestamp);
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
+            InvalidateVisual();
         }
         e.Pointer.Capture(this);
         e.Handled = true;
@@ -209,17 +189,23 @@ internal sealed class PowerChart : Control
         var layout = EnsureLayout();
         if (_dragStart is { } drag)
         {
-            var wasFollowing = IsFollowingLive;
-            IsFollowingLive = false;
-            if (wasFollowing) ViewChanged?.Invoke(this, EventArgs.Empty);
+            if (_state.IsFollowingLive)
+            {
+                _state.StopFollowingLive();
+                ViewChanged?.Invoke(this, EventArgs.Empty);
+            }
             if (_panning)
             {
-                _viewport = _dragRange.Pan(-(point.X - drag.X) / (layout.PlotRight - layout.PlotLeft) * _dragRange.Seconds,
-                    ChartSeries.Extent(_samples));
+                _state.PanFrom(_samples, _dragRange,
+                    -(point.X - drag.X) / (layout.PlotRight - layout.PlotLeft) * _dragRange.Seconds);
                 ChangedView();
             }
-            else if (_selectionAnchor is { } anchor && ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange) is { } sample)
-                SelectRange(anchor, sample.Timestamp);
+            else if (ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange) is { } sample &&
+                     _state.ExtendSelection(_samples, sample.Timestamp))
+            {
+                SelectionChanged?.Invoke(this, EventArgs.Empty);
+                InvalidateVisual();
+            }
         }
         var hover = !(_dragStart is not null && _panning) && InPlot(point, layout)
             ? ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange) : null;
@@ -317,7 +303,7 @@ internal sealed class PowerChart : Control
     {
         if (_layout is not null && _layoutSize == Bounds.Size) return _layout;
         _layoutSize = Bounds.Size;
-        var layout = PowerChartLayout.CalculatePrepared(_samples, Bounds.Width, Bounds.Height, viewport: _viewport);
+        var layout = PowerChartLayout.CalculatePrepared(_samples, Bounds.Width, Bounds.Height, viewport: _state.Viewport);
         _layout = layout;
         _geometry.Clear();
         _dots.Clear();

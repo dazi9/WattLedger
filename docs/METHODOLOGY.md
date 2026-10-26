@@ -123,6 +123,8 @@ The sampler must have capacity readings before and after a gap to calculate a ca
 - **Average standby watts** — standby Wh / standby hours.
 - **Battery health** — `FullChargedCapacity / DesignedCapacity`, if both are known.
 
+Daily reports use the local calendar day as a half-open interval `[local midnight, next local midnight)`. Sessions that cross midnight are clipped to each day and their duration, energy and capacity values are prorated; a session is never counted in full on two days. The next midnight is resolved independently from the current one so daylight-saving days are 23 or 25 hours long. The session ledger still stores each underlying sample/session once; only the day view is split.
+
 Timestamps are stored as UTC milliseconds. The UI and Markdown report convert to local time; CSV exports both `timestamp_local` and `timestamp_utc`.
 
 ### Interactive chart range estimates

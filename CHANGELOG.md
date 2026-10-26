@@ -13,12 +13,16 @@ All notable changes to WattLedger are documented here. The format is based on [K
 
 - A plain click in pan mode no longer pauses follow-live on either desktop; the first actual drag movement pauses it, and the Windows and Linux charts share this rule.
 - Manually entered selection ranges crossing midnight are rejected with an explicit same-day explanation on both desktops (previously Linux rejected them with a generic message and the limitation was undocumented).
+- The Linux chart now delegates its viewport, follow-live and selection transitions to the shared `ChartInteractionState`; the platform control only translates pointer/keyboard events and renders the result.
+- Daily report boundaries use timezone-aware local midnights, so daylight-saving days are 23 or 25 hours long instead of always 24.
 
 ### Fixed
 
 - Windows: the chart no longer rebuilds pens and looks up theme resources on every rendered frame (render assets are cached per layout and frozen); system-preference changes unrelated to appearance no longer re-apply the theme; post-await startup logic stays inside the guarded startup path; logoff/shutdown run the same stop path as an explicit exit; waiting for report/export work on exit is bounded to 5 seconds; `ExitApplication` can no longer skip `Shutdown` when cleanup throws.
 - Linux: hover movement only repaints when the hovered sample changes; horizontal wheel panning clamps large deltas the same way zooming does.
 - Theme preference saving tolerates unreadable settings files on all platforms and documents the non-atomic overwrite boundary on Unix.
+- Daily reports and daily summaries clip sessions at local midnight and prorate duration, energy and capacity values, so a session crossing midnight is no longer counted in full on both days or attributed entirely to its start date.
+- `GetSamples(..., maxPoints)` now returns at most the requested number of samples and keeps the first and last points.
 
 ## [0.2.0] - 2026-10-24
 
