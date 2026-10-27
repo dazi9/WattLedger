@@ -126,7 +126,7 @@ public sealed class LinuxDesktopTests
             var endpoint = Path.Combine(runtimeDirectory, "wattledger-linux.sock");
 
             Assert.Null(SingleInstance.TryStart(() => { }));
-            Assert.True(activated.Wait(TimeSpan.FromSeconds(2)));
+            Assert.True(activated.Wait(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
 
             owner.Dispose();
             Assert.False(File.Exists(endpoint));
@@ -177,10 +177,10 @@ public sealed class LinuxDesktopTests
         {
             if (second is { HasExited: false }) second.Kill(entireProcessTree: true);
             if (!primary.HasExited) primary.Kill(entireProcessTree: true);
-            try { await primary.WaitForExitAsync(); } catch (InvalidOperationException) { }
+            try { await primary.WaitForExitAsync(TestContext.Current.CancellationToken); } catch (InvalidOperationException) { }
             if (second is not null)
             {
-                try { await second.WaitForExitAsync(); } catch (InvalidOperationException) { }
+                try { await second.WaitForExitAsync(TestContext.Current.CancellationToken); } catch (InvalidOperationException) { }
                 second.Dispose();
             }
             Directory.Delete(root, recursive: true);
