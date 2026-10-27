@@ -24,6 +24,8 @@ public sealed class PowerChart : FrameworkElement
     private FormattedText? _emptyText;
     private bool _panning;
     private HwndSource? _source;
+    private readonly WindowsChartZoomSession _zoomInput = new();
+    private static readonly bool TraceInput = Environment.GetEnvironmentVariable("WATTLEDGER_INPUT_TRACE") == "1";
     // Render assets are rebuilt with the layout (theme changes clear it) and frozen so each frame only draws.
     private Pen? _gridPen;
     private Pen? _zeroPen;
@@ -38,13 +40,16 @@ public sealed class PowerChart : FrameworkElement
     {
         Focusable = true;
         ClipToBounds = true;
+        IsManipulationEnabled = true;
         Cursor = Cursors.Hand;
         Loaded += (_, _) =>
         {
+            _source?.RemoveHook(WindowMessage);
             _source = PresentationSource.FromVisual(this) as HwndSource;
             _source?.AddHook(WindowMessage);
         };
-        Unloaded += (_, _) => { _source?.RemoveHook(WindowMessage); _source = null; };
+        Unloaded += (_, _) => { _source?.RemoveHook(WindowMessage); _source = null; ResetGestureInput(); };
+        IsVisibleChanged += (_, _) => { if (!IsVisible) ResetGestureInput(); };
     }
 
     public event EventHandler? SelectionChanged;
@@ -120,29 +125,137 @@ public sealed class PowerChart : FrameworkElement
         var layout = EnsureLayout();
         var point = e.GetPosition(this);
         if (!InPlot(point, layout)) return;
-        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) Pan(-Math.Clamp(e.Delta / 120d, -5, 5) * VisibleRange.Seconds * .1);
-        else ZoomAt(Math.Pow(.8, Math.Clamp(e.Delta / 120d, -5, 5)),
-            (point.X - layout.PlotLeft) / (layout.PlotRight - layout.PlotLeft));
+        ApplyWheel(e.Delta / 120d, point, horizontal: false,
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Control), Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
         e.Handled = true;
+    }
+
+    private void ApplyWheel(double steps, Point point, bool horizontal, bool control, bool shift)
+    {
+        if (TraceInput) Console.Error.WriteLine($"WattLedger chart input: wheel steps={steps:R}, horizontal={horizontal}, ctrl={control}, shift={shift}, zoomOwner={_zoomInput.IsActive}");
+        // Consumed native/direct-touch gestures must not also apply promoted wheel packets.
+        if (_zoomInput.IsActive || !double.IsFinite(steps) || steps == 0) return;
+        if (!control && (horizontal || shift))
+            Pan((horizontal ? 1 : -1) * Math.Clamp(steps, -5, 5) * VisibleRange.Seconds * .1);
+        else
+        {
+            var factor = ChartGestureScale.WheelFactor(steps);
+            if (factor != 1) ZoomAt(factor, AnchorAt(point.X, EnsureLayout()));
+        }
     }
 
     private IntPtr WindowMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        const int wmMouseHWheel = 0x020E;
-        if (msg != wmMouseHWheel || !IsVisible || ActualWidth < 150) return IntPtr.Zero;
-        var packed = lParam.ToInt64();
-        var point = PointFromScreen(new Point((short)(packed & 0xffff), (short)((packed >> 16) & 0xffff)));
-        if (!InPlot(point, EnsureLayout())) return IntPtr.Zero;
-        // WM_MOUSEHWHEEL positive means scroll right, unlike Avalonia's content-motion delta.
-        var delta = Math.Clamp((short)((wParam.ToInt64() >> 16) & 0xffff) / 120d, -5, 5);
-        Pan(delta * VisibleRange.Seconds * .1);
+        if (msg is 0x0008 or 0x001F) // WM_KILLFOCUS / WM_CANCELMODE
+        {
+            ResetGestureInput();
+            return IntPtr.Zero;
+        }
+        if (!IsVisible || ActualWidth < 150 || ActualHeight < 70) return IntPtr.Zero;
+        if (msg == WindowsChartGestureInterop.Gesture)
+        {
+            if (!WindowsChartGestureInterop.TryRead(lParam, out var gesture)) return IntPtr.Zero;
+            // GID_BEGIN/GID_END must reach DefWindowProc. Only a zoom we actually own closes its handle here.
+            if (gesture.Id == WindowsChartGestureInterop.GestureEnd)
+            {
+                _zoomInput.EndNative();
+                return IntPtr.Zero;
+            }
+            if (gesture.Id != WindowsChartGestureInterop.Zoom) return IntPtr.Zero;
+            var point = PointFromScreen(new Point(gesture.X, gesture.Y));
+            var layout = EnsureLayout();
+            if (!_zoomInput.NativeZoom(gesture.SequenceId, gesture.Flags, gesture.Arguments, InPlot(point, layout), out var factor))
+                return IntPtr.Zero;
+            handled = true;
+            try
+            {
+                CancelPointerDrag();
+                if (TraceInput) Console.Error.WriteLine($"WattLedger chart input: native zoom sequence={gesture.SequenceId}, flags={gesture.Flags}, distance={gesture.Arguments}, factor={factor:R}");
+                if (factor != 1) ZoomAt(factor, AnchorAt(point.X, layout));
+            }
+            finally { WindowsChartGestureInterop.CloseGestureInfoHandle(lParam); }
+            return IntPtr.Zero;
+        }
+        // Precision Touchpads can generate Ctrl+wheel without changing WPF's global keyboard state.
+        // Read MK_CONTROL from the message and consume it before WPF can route a duplicate MouseWheel.
+        var horizontal = msg == WindowsChartGestureInterop.MouseHorizontalWheel;
+        if (!horizontal && (msg != WindowsChartGestureInterop.MouseWheel || !WindowsChartGestureInterop.IsControlDown(wParam)))
+            return IntPtr.Zero;
+        var location = WindowsChartGestureInterop.ScreenPoint(lParam);
+        var wheelPoint = PointFromScreen(new Point(location.X, location.Y));
+        if (!InPlot(wheelPoint, EnsureLayout())) return IntPtr.Zero;
+        ApplyWheel(WindowsChartGestureInterop.WheelSteps(wParam), wheelPoint, horizontal,
+            WindowsChartGestureInterop.IsControlDown(wParam), WindowsChartGestureInterop.IsShiftDown(wParam));
         handled = true;
         return IntPtr.Zero;
     }
 
+    protected override void OnManipulationStarting(ManipulationStartingEventArgs e)
+    {
+        base.OnManipulationStarting(e);
+        var contacts = e.Manipulators.Select(contact => contact.GetPosition(this)).ToArray();
+        if (contacts.Length == 0 || !InPlot(new Point(contacts.Average(point => point.X), contacts.Average(point => point.Y)), EnsureLayout()))
+        {
+            e.Cancel();
+            return;
+        }
+        // This is Windows Touch, not a promise that every touchpad produces WPF touch contacts.
+        e.ManipulationContainer = this;
+        e.Mode = ManipulationModes.Scale;
+        e.IsSingleTouchEnabled = false;
+        e.Handled = true;
+    }
+
+    protected override void OnManipulationStarted(ManipulationStartedEventArgs e)
+    {
+        base.OnManipulationStarted(e);
+        if (!InPlot(e.ManipulationOrigin, EnsureLayout()) || !_zoomInput.BeginManipulation())
+            Manipulation.CompleteManipulation(this);
+        else CancelPointerDrag();
+        e.Handled = true;
+    }
+
+    protected override void OnManipulationDelta(ManipulationDeltaEventArgs e)
+    {
+        base.OnManipulationDelta(e);
+        if (!_zoomInput.IsManipulationActive || e.IsInertial)
+        {
+            e.Complete();
+            e.Handled = true;
+            return;
+        }
+        var scale = e.DeltaManipulation.Scale;
+        var factor = WindowsChartGestureInterop.ManipulationFactor(scale.X, scale.Y);
+        if (TraceInput) Console.Error.WriteLine($"WattLedger chart input: WPF manipulation scale=({scale.X:R},{scale.Y:R}), factor={factor:R}");
+        if (factor != 1) ZoomAt(factor, AnchorAt(e.ManipulationOrigin.X, EnsureLayout()));
+        e.Handled = true;
+    }
+
+    protected override void OnManipulationCompleted(ManipulationCompletedEventArgs e)
+    {
+        base.OnManipulationCompleted(e);
+        _zoomInput.EndManipulation();
+        e.Handled = true;
+    }
+
+    private void CancelPointerDrag()
+    {
+        _dragStart = null;
+        if (IsMouseCaptured) ReleaseMouseCapture();
+    }
+    private void ResetGestureInput()
+    {
+        if (Manipulation.IsManipulationActive(this)) Manipulation.CompleteManipulation(this);
+        _zoomInput.Reset();
+        CancelPointerDrag();
+    }
+    private static double AnchorAt(double x, PowerChartLayout layout) => double.IsFinite(x)
+        ? Math.Clamp((x - layout.PlotLeft) / (layout.PlotRight - layout.PlotLeft), 0, 1) : .5;
+
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
         base.OnMouseDown(e);
+        if (_zoomInput.IsActive) { e.Handled = true; return; }
         if (e.ChangedButton is not (MouseButton.Left or MouseButton.Middle)) return;
         var point = e.GetPosition(this);
         var layout = EnsureLayout();
