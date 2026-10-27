@@ -23,6 +23,7 @@
     <NoWarn>$(NoWarn);CS0649;CS8669</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <None Update="LICENSE-Avalonia.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="Avalonia.Wayland.LICENSE.md" />
     <!-- Official reference DLLs intentionally remove platform implementer APIs.
          Compile against the matching, signed implementation DLLs instead. -->
     <PackageReference Include="Avalonia" Version="[12.1.4]" ExcludeAssets="compile" GeneratePathProperty="true" />
