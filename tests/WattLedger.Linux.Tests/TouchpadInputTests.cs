@@ -73,6 +73,9 @@ public sealed class TouchpadInputTests
         var (window, chart) = OpenChart();
         try
         {
+            chart.InteractionMode = ChartInteractionMode.Select;
+            chart.SelectRange(chart.Samples[400].Timestamp, chart.Samples[500].Timestamp);
+            var selectionBeforePinch = chart.Selection;
             var firstPosition = PlotPoint(window, chart, .3);
             var secondPosition = PlotPoint(window, chart, .7);
             var initial = chart.VisibleRange;
@@ -82,7 +85,7 @@ public sealed class TouchpadInputTests
             Assert.Equal(initial.Seconds / 1.5, chart.VisibleRange.Seconds, 3);
             window.TouchMove(second, PlotPoint(window, chart, 1));
             Assert.Equal(initial.Seconds / 1.75, chart.VisibleRange.Seconds, 3);
-            Assert.Null(chart.Selection);
+            Assert.Equal(selectionBeforePinch, chart.Selection);
             Assert.False(chart.IsFollowingLive);
             window.TouchEnd(second, PlotPoint(window, chart, 1));
             window.TouchEnd(first, firstPosition);
@@ -90,6 +93,11 @@ public sealed class TouchpadInputTests
             var afterPinch = chart.VisibleRange;
             window.MouseWheel(PlotPoint(window, chart, .5), new Vector(0, .1));
             Assert.True(chart.VisibleRange.Seconds < afterPinch.Seconds);
+            window.MouseDown(PlotPoint(window, chart, .4), MouseButton.Left);
+            window.MouseMove(PlotPoint(window, chart, .6));
+            window.MouseUp(PlotPoint(window, chart, .6), MouseButton.Left);
+            Assert.NotEqual(selectionBeforePinch, chart.Selection);
+            Assert.NotNull(chart.Selection);
         }
         finally { window.Close(); }
     }

@@ -36,6 +36,8 @@ internal sealed class PowerChart : Control
     private readonly ChartScaleSession _pinchScale = new();
     private readonly HashSet<IPointer> _touchContacts = [];
     private bool _pinching;
+    private ChartSelectionStatistics? _selectionBeforeTouch;
+    private bool _hasTouchSelectionSnapshot;
     private ulong _lastMagnifyTimestamp;
     private readonly bool _traceInput = Environment.GetEnvironmentVariable("WATTLEDGER_INPUT_TRACE") == "1";
 
@@ -205,6 +207,18 @@ internal sealed class PowerChart : Control
             _pinching = true;
             _pinchScale.Begin();
             _dragStart = null;
+            // The first touch may already have started a single-contact selection.
+            // Restore it when a second contact turns that interaction into pinch.
+            if (_hasTouchSelectionSnapshot)
+            {
+                if (_selectionBeforeTouch is { } selection)
+                    _state.SelectRange(_samples, selection.Start, selection.End);
+                else
+                    _state.ClearSelection();
+                _hasTouchSelectionSnapshot = false;
+                _selectionBeforeTouch = null;
+                SelectionChanged?.Invoke(this, EventArgs.Empty);
+            }
         }
         var factor = _pinchScale.Update(e.Scale);
         ApplyGestureZoom(factor, e.ScaleOrigin, layout);
@@ -222,6 +236,9 @@ internal sealed class PowerChart : Control
     {
         _pinching = false;
         _pinchScale.End();
+        _touchContacts.Clear();
+        _hasTouchSelectionSnapshot = false;
+        _selectionBeforeTouch = null;
     }
 
     private bool ApplyGestureZoom(double factor, Point point, PowerChartLayout layout)
@@ -238,6 +255,11 @@ internal sealed class PowerChart : Control
         if (!InPlot(point, layout)) return;
         if (e.Pointer.Type is PointerType.Touch or PointerType.Pen)
         {
+            if (!_hasTouchSelectionSnapshot)
+            {
+                _selectionBeforeTouch = _state.Selection;
+                _hasTouchSelectionSnapshot = true;
+            }
             _touchContacts.Add(e.Pointer);
             if (_touchContacts.Count > 1)
             {
@@ -248,7 +270,7 @@ internal sealed class PowerChart : Control
         var properties = e.GetCurrentPoint(this).Properties;
         if (!properties.IsLeftButtonPressed && !properties.IsMiddleButtonPressed) return;
         Focus();
-        if (e.ClickCount == 2 && properties.IsLeftButtonPressed)
+        if (e.Pointer.Type == PointerType.Mouse && e.ClickCount == 2 && properties.IsLeftButtonPressed)
         {
             ResetView();
             e.Handled = true;
@@ -307,6 +329,11 @@ internal sealed class PowerChart : Control
     {
         base.OnPointerReleased(e);
         _touchContacts.Remove(e.Pointer);
+        if (_touchContacts.Count == 0 && !_pinching)
+        {
+            _hasTouchSelectionSnapshot = false;
+            _selectionBeforeTouch = null;
+        }
         var wasDragging = _dragStart is not null;
         _dragStart = null;
         if (e.Pointer.Captured == this) e.Pointer.Capture(null);
@@ -315,6 +342,7 @@ internal sealed class PowerChart : Control
     protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
     {
         base.OnPointerCaptureLost(e);
+        _touchContacts.Remove(e.Pointer);
         _dragStart = null;
     }
     protected override void OnPointerExited(PointerEventArgs e)

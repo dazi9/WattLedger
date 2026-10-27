@@ -9,4 +9,8 @@
     <Project Path="tests/WattLedger.Core.Tests/WattLedger.Core.Tests.csproj" />
     <Project Path="tests/WattLedger.Linux.Tests/WattLedger.Linux.Tests.csproj" />
   </Folder>
+  <Folder Name="/third_party/">
+    <Project Path="third_party/Avalonia.Wayland/Avalonia.Wayland.csproj" />
+    <Project Path="third_party/Avalonia.Wayland/generator/Generator.csproj" />
+  </Folder>
 </Solution>
