@@ -2,185 +2,147 @@
 
 **A local-first energy journal for Windows and Linux laptops.**
 
-**English** · [简体中文](README.zh-CN.md)
+English · [简体中文](README.zh-CN.md)
 
-WattLedger records battery power, energy use, charging and sleep gaps, and battery health in a local SQLite database. It combines a desktop dashboard with a scriptable CLI. Basic battery readings need no kernel driver or administrator rights; the application has no network service, accounts, cloud sync or telemetry.
+WattLedger records how much energy your battery actually delivers, separates active use from sleep, breaks system power down into package / CPU / GPU / DRAM where the hardware exposes it, and keeps a long-term battery-health history. No kernel driver, no administrator rights for basic battery readings, no network, no telemetry.
 
-The current source version is **0.2.1**. Check [Releases](https://github.com/dazi9/WattLedger/releases) and the [changelog](CHANGELOG.md) for published versions: features in this branch may be newer than a release asset. Both desktop applications support English and Simplified Chinese, with a saved System language option.
+Current source: **0.2.1** · [Changelog](CHANGELOG.md) · [Releases](https://github.com/dazi9/WattLedger/releases)
 
-![Windows dashboard with synthetic demonstration data](docs/screenshot.png)
+![WattLedger dashboard with synthetic demonstration data](docs/screenshot.png)
 
-## What it does
+*Synthetic demonstration data.*
 
-- **Live readings:** battery discharge/charge watts, percentage, voltage, remaining energy and estimated time remaining; unavailable values stay unavailable.
-- **Energy ledger:** active, AC, charging and sleep/standby sessions with durations, energy and battery changes; daily reports respect local midnight and daylight-saving boundaries.
-- **Interactive charts on both desktops:** pan, zoom, original-point inspection, custom time ranges, energy/average-power/coverage statistics and follow-live views.
-- **Light, Dark and System appearance:** persistent settings, shared colors and live theme updates where the desktop exposes them.
-- **English and Simplified Chinese UI:** choose System / English / 简体中文; switch immediately and keep the preference across restarts.
-- **Battery health:** design/full-charge capacity, optional cycle count and stored health history.
-- **Local history and exports:** SQLite, CSV samples, and JSON/Markdown reports.
-- **Windows hardware context:** Energy Meter/RAPL package, CPU, GPU and DRAM readings where supported, plus optional brightness and foreground-process context.
-- **Linux desktop integration:** sysfs battery readings, logind suspend/resume notifications, native Wayland or X11, optional tray and user-scoped start at login.
+## Why another battery tool?
 
-Per-app energy attribution, a multi-day desktop chart browser and standby alerts are **not implemented yet**.
+Windows shows a percentage. `powercfg /batteryreport` gives a static snapshot. HWiNFO and MSI Afterburner are excellent sensor dashboards, but they are not battery journals: they do not answer "where did today's watt-hours go?" or "how much did standby drain overnight?"
 
-## Platform support and requirements
+WattLedger is deliberately narrow:
 
-| Platform | Desktop and sensor path | Validation boundary |
-|---|---|---|
-| Windows x64 | WPF; battery IOCTLs and optional Energy Meter/RAPL | Windows CI builds/tests; primary hardware record is Windows 11 on a MECHREVO WUJIE. Recent tray, gesture and theme behavior still needs broader Windows hardware checks. |
-| Linux x64 | Avalonia 12.1.4; sysfs and logind; native Wayland or X11 | Ubuntu 24.04 and Debian 12/13 CI builds/tests. Native Wayland startup and continued sampling checked on Ubuntu 24.04.5 GNOME with `DISPLAY` removed. Other desktop/driver combinations are not certified. |
+- **Live power:** battery discharge/charge watts, voltage, remaining energy, time left.
+- **Energy accounting:** trapezoidal integration of battery power, calibrated against the battery's remaining-capacity counter.
+- **Session ledger:** AC, charging, battery and Modern Standby segments with start/end percentage, duration, Wh and average watts.
+- **Hardware breakdown:** Windows Energy Meter (RAPL) counters for package, CPU, GPU and DRAM power on supported Intel/AMD machines.
+- **Battery health:** design capacity, full-charge capacity, cycle count and stored health history.
+- **Long-term history:** SQLite, local-only, exportable to CSV, JSON or Markdown.
+- **Desktop app + CLI:** a WPF dashboard on Windows, an Avalonia desktop app on Linux, and a scriptable command-line interface.
+- **English and Simplified Chinese UI:** choose System, English or 简体中文 in the footer; the choice persists across restarts.
 
-Source builds require the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). Self-contained publish outputs include the .NET runtime, but Linux still requires native graphics, font and system libraries. The Debian package declares these dependencies; other distributions need equivalent packages. RPM/Arch packages and ARM64 builds are not provided by the current packaging workflow.
+### How it compares
 
-Native Wayland is **experimental upstream**. X11 remains a compatibility option, including through XWayland. A StatusNotifier/AppIndicator host is needed for a Linux tray icon; the app keeps its window available without one. Basic readings depend on readable battery interfaces and firmware, not just the OS version. See [hardware coverage](docs/supported-hardware.md) and [Linux backend requirements](docs/linux-display-backends.md).
+| Tool | Live watts | Long-term journal | Standby accounting | Per-app energy | No driver/admin |
+|---|---|---|---|---|---|
+| Windows Settings / battery report | partial | no | partial | newer builds | yes |
+| HWiNFO64 | yes | CSV only | manual | no | partial |
+| MSI Afterburner | GPU-centric | no | no | no | yes |
+| Powir | no | battery report | no | no | yes |
+| Watt's Left | yes | 30 min | no | no | yes |
+| **WattLedger** | **yes** | **yes** | **yes** | planned | **yes** |
 
-## Get started
+Third-party rows summarize public documentation; check current versions before relying on them.
 
-### Published builds
+## Requirements
 
-Use an available asset from [Releases](https://github.com/dazi9/WattLedger/releases), or build the current source below. Package artifacts are produced by the tag/manual package workflow; creating a commit or PR does not publish a release. The release workflow creates drafts for maintainers to publish manually.
+- Windows 10 or 11, x64.
+- Ubuntu 24.04 or Debian 12/13, x64. GNOME is the tested desktop; other desktops need the native libraries listed in [Linux display backends](docs/linux-display-backends.md).
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) to build from source.
+- A laptop battery with a supported Windows battery interface or Linux sysfs battery entries.
 
-For a downloaded Debian/Ubuntu package:
+The Linux desktop supports native Wayland (experimental) and X11. Automatic selection prefers Wayland in a Wayland session; use `--backend=x11` for X11/XWayland compatibility. The tray icon is optional and needs a StatusNotifier/AppIndicator host; without one, keep the app window open.
 
-```sh
-sudo apt install ./wattledger-linux-x64.deb
-wattledger status
-wattledger-desktop
-```
+Basic battery readings do not require administrator rights or a kernel driver. Linux sensor availability depends on readable kernel sysfs interfaces.
 
-The package installs the CLI, desktop launcher, application entry and icon. Linux portable/self-contained output can also be used directly after installing the required native libraries. A published Windows desktop executable starts the dashboard; add `--tray` to start in the notification area.
+## Quick start
 
-### Build and run from source
+On Windows, in PowerShell or a terminal:
 
 ```sh
 git clone https://github.com/dazi9/WattLedger.git
 cd WattLedger
+
+dotnet build WattLedger.slnx -c Release
+
+# One-shot status
+dotnet run --project src/WattLedger.Cli -- status
+
+# Record continuously (Ctrl+C to stop)
+dotnet run --project src/WattLedger.Cli -- watch
+
+# Today's ledger
+dotnet run --project src/WattLedger.Cli -- today
+
+# JSON / Markdown / CSV export
+dotnet run --project src/WattLedger.Cli -- export --format md --output report.md
+dotnet run --project src/WattLedger.Cli -- export --format csv --output samples.csv
+
+# Hardware / database diagnostics
+dotnet run --project src/WattLedger.Cli -- diag
+
+# Desktop app (tray + dashboard)
+dotnet run --project src/WattLedger.App
 ```
 
-On Linux:
+On Linux, use the platform solution and desktop project:
 
 ```sh
 dotnet build WattLedger.Linux.slnx -c Release
 dotnet run --project src/WattLedger.Cli -- status
 dotnet run --project src/WattLedger.Linux
-# Choose a backend explicitly if needed:
-dotnet run --project src/WattLedger.Linux -- --backend=x11
 ```
 
-On Windows, using PowerShell:
+The Linux desktop accepts `--db <path>`, `--tray` and `--backend auto|wayland|x11`. `WATTLEDGER_BACKEND` supplies a default when the command-line option is omitted. See [Linux display backends](docs/linux-display-backends.md) for native-library requirements, fallback behavior and current limitations. Data defaults to `$XDG_DATA_HOME/wattledger` (or `~/.local/share/wattledger`).
 
-```powershell
-dotnet build WattLedger.slnx -c Release
-dotnet run --project src/WattLedger.Cli -- status
-dotnet run --project src/WattLedger.App
-dotnet run --project src/WattLedger.App -- --tray
-```
+`wattledger status` is a sensor-only read: it does not create the database, record a sample, or take the sampler's writer lease, and remains usable while the desktop or `watch` records. Desktop `--db` paths are made absolute at launch so enabling start-at-login keeps the same database. If another sampler owns the database, the Windows app reports the startup failure even in `--tray` mode and displays `NOT RECORDING`.
 
-The desktop records while running, including while hidden. `wattledger status` only reads live sensors: it does not create a database, write samples or take the sampler lease. Use the desktop or `watch` to accumulate history. Only one sampler may own a particular database; stop the other desktop/`watch` process if startup reports **NOT RECORDING**, then restart the intended sampler. Reports and sensor-only status remain usable alongside recording.
+## Using the chart
 
-## CLI
+The chart spans actual recorded timestamps, with green signed power and a blue dashed battery-percentage curve. Positive power means discharge; negative power means charging, including in the live card and tray tooltip.
 
-The examples use the published `wattledger` executable. From source, replace it with `dotnet run --project src/WattLedger.Cli --`.
+- **Zoom:** scroll over the plot, pinch on a precision touchpad, use Ctrl+scroll, the **+/−** buttons or keys, and use **Fit today**, double-click or Home to fit today's loaded range.
+- **Pan:** in **Pan** mode, left-drag the plot. Shift-drag or middle-drag pans temporarily; arrow keys and horizontal scroll also pan.
+- **Select:** switch to **Select** and drag between recorded points, or enter local From / To times (`HH:mm:ss`) and click **Calculate**. **Fit selection** zooms to the range; Escape clears it.
+- **Follow live:** press End or **Follow live**. Dragging or navigating pauses following.
+- **Inspect:** hover for the original sample's timestamp, watts and battery percentage.
 
-```sh
-wattledger status
-wattledger watch                         # Record until Ctrl+C
-wattledger today
-wattledger report --date 2026-10-27
-wattledger export --format csv --output samples.csv
-wattledger export --format json --date 2026-10-27 --output report.json
-wattledger export --format md --date 2026-10-27 --output report.md
-wattledger diag
-wattledger init
-wattledger --help
-```
+Native Wayland pinch uses the bundled patched Avalonia backend and needs a compositor that exposes pointer gestures. X11/XWayland keeps wheel, Ctrl+scroll, button and keyboard zoom.
 
-`report` and `export` default to today; `--date` uses a local calendar date in `yyyy-MM-dd` format. CSV contains samples; JSON and Markdown contain a day report. `init` creates/initializes a database. To choose a database, add `--db <path>` after the command, for example `wattledger watch --db ./workday.db`.
+Chart drawing reduces points to the available pixels but keeps each column's extrema; range calculations always use the original samples, not the reduced curve.
 
-Sampling normally runs every **5 seconds on battery** and **30 seconds on AC**. The CLI is a system-level journal; a stored foreground-process name is context, not a per-app energy measurement.
+Range statistics are power-rate estimates, separate from the capacity-calibrated ledger totals. Missing rates, intervals longer than 60 seconds, and recorded sleep gaps (including confirmed short suspends) are excluded from integration; average power uses only covered seconds. An interval with no usable power is shown as unavailable.
 
-## Desktop charts and appearance
+Reports and exports run in the background. Chart history loads incrementally, and report/chart refresh is deferred while hidden or minimized and catches up when restored.
 
-Both desktops use shared chart calculations and interaction state. The chart covers **today's loaded samples**, initially following the latest 30 minutes. Short recordings use the available range; if all data already fits, zoom in to make panning meaningful.
+## Linux battery values
 
-| Action | Behavior |
-|---|---|
-| **Pan**, then ordinary left drag | Move through the recorded range; drag right for earlier samples. |
-| **Earlier / Later** or Left / Right keys | Pan the visible window; boundary labels explain when no more data is available. |
-| Horizontal scroll | Pan; Ctrl+scroll zooms, including fractional wheel deltas. |
-| Vertical wheel, **+/−** buttons or keys | Zoom; wheel zoom is anchored to the pointer. |
-| **Select**, then left drag | Pick original timestamps and calculate the selected interval. |
-| Shift + left drag or middle drag | Temporarily pan, including in Select mode. |
-| **Fit today**, double-click or Home | Fit the currently loaded day and pause following. |
-| **Follow live** or End | Follow new samples again. A plain click does not pause following; dragging or navigation does. |
-| **More → Fit selection / Clear selection**, Escape | Fit the selection or clear it. |
-| **Selection analysis →** From / To + **Calculate** | Enter `HH:mm` or `HH:mm:ss` within the same local day. Cross-midnight input is rejected. |
+Linux battery values are read from kernel sysfs and converted from its micro-units to WattLedger's internal mWh, mW and mV units. Missing sysfs values remain unavailable. A missing or zero `power_now` falls back to usable `current_now` and voltage. When a battery reports no usable rate, WattLedger estimates energy from capacity changes; quantization and firmware update cadence can make short intervals appear as zero.
 
-Hover shows the original sample timestamp, watts and battery percentage. **Positive watts mean discharge; negative watts mean charging**, including the live card and tray tooltip. The power axis adapts to the viewport; battery percentage stays at 0–100%.
+Linux does not provide RAPL, brightness or foreground-process readings. A `SleepGap` is timestamp-detected; when logind suspend and resume events are both observed, its note records that confirmation, otherwise it remains explicitly inferred. Missing capacity is marked as unavailable, and report summaries flag standby energy as partial.
 
-Selection summaries show discharged/charged energy, signed net Wh, time-weighted average watts, min/max and valid-data coverage. They integrate **original power readings**, independent of display reduction. Missing rates, gaps over 60 seconds and recorded sleep gaps are excluded. A range with no usable power remains unavailable. These range estimates are separate from the capacity-calibrated session ledger, so totals can differ.
+Basic live readings and UI startup have been checked on Ubuntu 24.04.5 GNOME. Per-model sensor coverage and suspend behavior are tracked in [supported hardware](docs/supported-hardware.md), and the backend design is documented in [Linux display backends](docs/linux-display-backends.md).
 
-Choose **System / Light / Dark** in the footer's Theme selector. The choice persists across restarts. System mode follows the appearance supplied by the platform; choose Light or Dark explicitly if the desktop does not expose a theme preference.
+## Where your data lives
 
-Choose **System / English / 简体中文** beside Theme to change the interface language immediately. Chinese system locales select Simplified Chinese in System mode; other locales use English. Numeric formats and manual `HH:mm[:ss]` input retain their existing rules; database records, CLI output and export field names stay stable. See [application language](docs/app-localization.md).
-
-The compact chart toolbar keeps the interaction mode, zoom and follow-live controls visible. **More** holds earlier/later navigation, fit and clear actions; expand **Selection analysis** for manual time entry. **Application** groups exports, data folder, start at login, tray and quit.
-
-Native Wayland pinch now uses the compositor's `zwp_pointer_gestures_v1` protocol through a narrowly patched Avalonia backend. It requires compositor support; the X11 compatibility backend does not supply native touchpad pinch. Windows handles precision-touchpad Ctrl+wheel and native zoom gestures when Windows delivers them. The user confirmed native Wayland two-finger pinch on the local Ubuntu 24.04 GNOME session; other hardware/compositors and physical Windows input remain unverified. Buttons and keyboard remain available. See [touchpad input](docs/touchpad-input.md), [Windows gestures](docs/windows-touchpad.md), [chart behavior](docs/chart-navigation.md) and [known issues](docs/KNOWN-ISSUES.md).
-
-Light and dark chart previews, using the same synthetic data:
-
-![Light chart](docs/theme-light.png)
-![Dark chart](docs/theme-dark.png)
-
-## Linux display backend
-
-```sh
-wattledger-desktop --backend=auto
-wattledger-desktop --backend=wayland
-wattledger-desktop --backend=x11
-WATTLEDGER_BACKEND=x11 wattledger-desktop
-```
-
-The default is `auto`; a command-line option overrides the environment setting. Auto prefers a local Wayland session and permits X11 fallback when available. Explicit `wayland` requires a compositor and working EGL/OpenGL drivers and does not silently switch to X11. Explicit `x11` requires `DISPLAY`; on a Wayland desktop it needs XWayland. Backend selection applies at process startup; opening another instance activates the existing one.
-
-Both desktops accept `--db <path>` and `--tray`. Start-at-login settings are user scoped; the Linux XDG entry preserves the selected backend and database path. Without a tray host, the Linux window remains available. For a headless machine use the CLI. See [backend selection and native libraries](docs/linux-display-backends.md).
-
-## Data, backup and privacy
-
-| Data | Windows | Linux |
-|---|---|---|
-| Default database | `%LocalAppData%\WattLedger\wattledger.db` | `$XDG_DATA_HOME/wattledger/wattledger.db`, or `~/.local/share/wattledger/wattledger.db` |
-| Theme preference | `%LocalAppData%\WattLedger\preferences.json` | `$XDG_CONFIG_HOME/wattledger/preferences.json`, or `~/.config/wattledger/preferences.json` |
-
-The CLI and desktop share the database on each platform. `--db` overrides its location; the desktop makes that path absolute for autostart. Quit an existing desktop instance before changing its database or backend. Data stays on your machine. Samples can contain battery/device details, optional Windows hardware context and foreground-process names; document contents, window titles and URLs are not collected.
-
-Quit both the desktop and `watch` before copying or removing history. Back up the data directory, including any SQLite `-wal` / `-shm` files still present, or use SQLite's backup API for a live backup. Exports and explicit `--db` locations are separate files. Removing the package does not remove your history or preferences; disable start at login before uninstalling. Review diagnostics and exports before sharing them publicly.
-
-See [privacy details](docs/PRIVACY.md). Network access used to download source/packages is separate from the installed application's local-only operation.
-
-## How measurements work
+The Windows app and CLI share the same database:
 
 ```text
-Windows battery IOCTL + optional Energy Meter/RAPL ─┐
-Linux sysfs battery + logind events ────────────────┼─> sampler / session tracker
-Windows power events ──────────────────────────────┘            │
-                                                               ▼
-                                                    SQLite (local WAL database)
-                                                               │
-                                          ┌────────────────────┴───────────────────┐
-                                          ▼                                        ▼
-                                  CLI reports/exports                    WPF / Avalonia desktops
+%LocalAppData%\WattLedger\wattledger.db
 ```
 
-Battery power is the system-level reference. Energy accounting integrates net power and uses remaining-capacity changes for calibration/fallback where available. Hardware counters cover only their exposed domains, not the entire laptop. A displayed remaining-time estimate is not a controlled battery-rundown measurement.
+On Linux, the default database is `$XDG_DATA_HOME/wattledger/wattledger.db`, falling back to `~/.local/share/wattledger/wattledger.db`. Both platforms accept `--db` for an explicit location.
 
-On Linux, missing/zero `power_now` can fall back to usable current and voltage; capacity changes can provide an estimate when no rate is usable. RAPL, brightness and foreground-process readings are currently unavailable on Linux. `Charging` is affirmative evidence of external power even if an AC/USB entry says `online=0`. Ambiguous `Full` / `Unknown` / `Not charging` without external-power evidence pauses session continuity rather than inventing battery activity.
+Quit the desktop and `watch` before copying or removing the database. Back up the data directory, including any `-wal` and `-shm` files, or use SQLite's backup API for a live backup. Delete the file to reset history; export first if you want to keep it.
 
-Windows retains the `ModernStandby` gap label; Linux uses `SleepGap`. Both observed logind suspend and resume events are needed to mark a Linux suspend as confirmed; timestamp gaps alone are inferred. Sleep energy depends on usable capacity deltas, and missing energy is marked incomplete. Daily reports clip sessions at timezone-aware local midnights, including 23/25-hour daylight-saving days; clipped capacity/energy values can be prorated estimates. See [measurement methodology](docs/METHODOLOGY.md).
+## Demo data
 
-## Build self-contained packages
+The screenshot in this README is generated from synthetic data, not from a real user's history:
+
+```sh
+python tools/seed-demo.py --db demo.db
+dotnet run --project src/WattLedger.App -- --db demo.db
+```
+
+The script refuses to touch a database named `wattledger.db` unless you pass `--force`.
+
+## Self-contained builds
 
 Linux x64:
 
@@ -201,28 +163,84 @@ dotnet publish src/WattLedger.App -c Release -r win-x64 --self-contained true `
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/desktop-win-x64
 ```
 
-The Debian script needs `dpkg-deb` and Python 3, refuses to overwrite an existing output and currently produces an `amd64` package. Self-contained Linux builds still need the native libraries described above.
+The Debian script needs `dpkg-deb` and Python 3 and produces an `amd64` package. Linux builds still need the native graphics, font and display libraries described in [Linux display backends](docs/linux-display-backends.md).
 
-## Development and remaining work
+## How it works
 
 ```text
-src/WattLedger.Core/       Native readers, sampling, energy/session engine, SQLite and reports
-src/WattLedger.Desktop/    UI-free chart math/state, dashboard loading and theme preferences
-src/WattLedger.App/        Windows WPF desktop
-src/WattLedger.Linux/      Linux Avalonia desktop
-src/WattLedger.Cli/        Command-line interface
-tests/                    Engine, desktop-state and headless interaction tests
-docs/                     Methodology, platform notes, privacy and follow-ups
+Windows battery IOCTL + Energy Meter/RAPL ─┐
+Linux sysfs battery + logind events ───────┼─> sampler / session tracker
+Windows power events ──────────────────────┘            │
+                                                       ▼
+                                            SQLite (local WAL database)
+                                                       │
+                                  ┌────────────────────┴───────────────────┐
+                                  ▼                                        ▼
+                          CLI reports/exports                    WPF / Avalonia desktops
 ```
 
-Core has no UI dependency. Both desktop projects compile-link the shared presentation sources; platform controls translate events and draw the shared results. CI builds/tests Windows and Ubuntu/Debian targets and checks formatting. GUI automation, cross-compilation and CI containers do not replace physical hardware, suspend/resume, precision-touchpad or battery-rundown validation.
+- **Battery:** SetupAPI enumeration plus `IOCTL_BATTERY_QUERY_STATUS` / `IOCTL_BATTERY_QUERY_INFORMATION` for mWh, mW, mV, design capacity, full-charge capacity and cycle count on Windows; sysfs on Linux.
+- **System power:** the battery's discharge rate is the ground truth. On Intel/AMD machines, the Windows Energy Meter performance counter set exposes package, CPU, GPU and DRAM power without a driver.
+- **Energy:** trapezoidal integration of net battery power over each sample interval, with a remaining-capacity fallback when firmware reports no rate.
+- **Sleep gaps:** a sampling gap longer than 60 seconds remains `ModernStandby` on Windows for historical compatibility and is labeled `SleepGap` on Linux. A Linux session note records a confirmed suspend/resume only when both logind events were observed; otherwise the gap remains inferred. Gap energy uses remaining-capacity deltas when available; unavailable energy retains the existing numeric zero in the schema but is marked in the note and report as incomplete.
+- **Storage:** SQLite in WAL mode, one row per sample, one row per session, one health snapshot per day.
 
-For synthetic demo data, quit any existing desktop instance, run `python tools/seed-demo.py --db demo.db`, then launch a desktop with `--db demo.db`. The script refuses the production name `wattledger.db` unless explicitly forced.
+See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for the formulas and edge cases.
 
-Later candidates include historical/multi-day desktop navigation, per-app **estimated** attribution, alerts, additional packaging/architectures and broader hardware validation; these are not promises tied to an already released version. See [the iteration plan](docs/NEXT-ITERATION.md), [known issues](docs/KNOWN-ISSUES.md), [changelog](CHANGELOG.md) and [contributing guide](CONTRIBUTING.md).
+## Project layout
 
-For reports, include the laptop/OS/desktop details and reviewed `wattledger diag` output. Keep personal database contents and serial numbers out of public attachments.
+```text
+src/WattLedger.Core/      Native readers, energy engine, SQLite, reports
+src/WattLedger.Desktop/   Shared UI-free chart math/state, dashboard loading, theme preferences
+src/WattLedger.Cli/       Scriptable CLI (status / watch / today / export / diag)
+src/WattLedger.App/       WPF tray app and dashboard
+src/WattLedger.Linux/     Avalonia desktop app for Linux
+tests/                    Unit tests for integration and session state
+docs/                     Methodology, privacy, hardware and platform notes
+```
+
+The core library has no UI dependency; the CLI and both desktop apps are thin clients over the same engine. Shared chart math and interaction state live in `WattLedger.Desktop`.
+
+## Privacy
+
+WattLedger is local-first by design:
+
+- no network connections;
+- no accounts or telemetry;
+- no background cloud sync.
+
+Local data includes the SQLite database, preferences, SQLite WAL/SHM files, logs, the start-at-login entry and the .NET extraction cache. Document contents, window titles and URLs are not collected. Windows records the foreground process name with samples; Linux does not. `wattledger diag` can include device names, paths, row counts and firmware serial numbers; review it before sharing.
+
+See [docs/PRIVACY.md](docs/PRIVACY.md).
+
+## Roadmap
+
+- **0.1:** Windows energy journal, tray app, CLI, CSV/JSON/Markdown export, battery health.
+- **0.2.x:** shared chart navigation and statistics, themes, day-boundary-safe reports, native Wayland backend, precision-touchpad pinch, English/Simplified Chinese UI.
+- **Next:** broader hardware, compositor and device coverage.
+- **Later:** historical/multi-day chart navigation, per-app estimated attribution, standby alerts, additional packaging and architectures, standardized battery-rundown validation.
+
+## Limitations
+
+- Battery firmware sampling is coarse: some machines update capacity in 1% steps and report rate noisily. WattLedger shows what the hardware exposes and labels measured versus estimated values.
+- Some laptops expose no discharge rate; the remaining-capacity fallback is used.
+- RAPL / Energy Meter availability varies by CPU and firmware. `wattledger diag` shows what your machine exposes.
+- Native Wayland pinch depends on the compositor exposing pointer gestures; X11/XWayland keeps wheel, Ctrl+scroll, button and keyboard zoom.
+- Windows precision-touchpad gestures depend on what the device and Windows deliver; wheel, Ctrl+scroll, buttons and keyboard zoom remain available.
+- Per-app energy attribution is not implemented. Windows does not provide a precise public per-app energy API; a later version will use CPU/GPU time-share estimates and label them as estimates.
+- If the app is not running during a sleep period, that interval cannot be reconstructed. A Linux `SleepGap` is not proof that the machine slept. Keep the app running for continuous history; Linux supports user-scoped XDG autostart.
+- Windows testing is primarily on a MECHREVO WUJIE (Intel Core Ultra 5 226V, Windows 11 build 26200). Linux startup has been checked on Ubuntu 24.04.5 GNOME. See [supported hardware](docs/supported-hardware.md); community reports for other laptops are welcome.
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md). For bug reports, include the output of:
+
+```sh
+dotnet run --project src/WattLedger.Cli -- diag
+```
+
+Also include your laptop model and Windows build. Do not attach personal files from the database unless you have reviewed them.
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
+MIT. See [LICENSE](LICENSE).
