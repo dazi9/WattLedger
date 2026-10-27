@@ -15,6 +15,7 @@
     <ProjectReference Include="../../src/WattLedger.Core/WattLedger.Core.csproj" />
     <!-- Exercise the production startup path without requiring a Windows UI session. -->
     <Compile Include="../../src/WattLedger.Desktop/ChartGestureScale.cs" Link="ChartGestureScale.cs" />
+    <Compile Include="../../src/WattLedger.App/WindowsChartGestures.cs" Link="WindowsChartGestures.cs" />
     <Compile Include="../../src/WattLedger.App/SamplerStartup.cs" Link="SamplerStartup.cs" />
     <Compile Include="../../src/WattLedger.Desktop/ThemePreference.cs" Link="ThemePreference.cs" />
   </ItemGroup>
