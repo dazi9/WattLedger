@@ -127,7 +127,7 @@ Choose **System / English / 简体中文** beside Theme to change the interface 
 
 The compact chart toolbar keeps the interaction mode, zoom and follow-live controls visible. **More** holds earlier/later navigation, fit and clear actions; expand **Selection analysis** for manual time entry. **Application** groups exports, data folder, start at login, tray and quit.
 
-Native Wayland pinch now uses the compositor's `zwp_pointer_gestures_v1` protocol through a narrowly patched Avalonia backend. It requires compositor support; the X11 compatibility backend does not supply native touchpad pinch. Windows handles precision-touchpad Ctrl+wheel and native zoom gestures when Windows delivers them. Physical device coverage is still pending; buttons and keyboard remain available. See [touchpad input](docs/touchpad-input.md), [Windows gestures](docs/windows-touchpad.md), [chart behavior](docs/chart-navigation.md) and [known issues](docs/KNOWN-ISSUES.md).
+Native Wayland pinch now uses the compositor's `zwp_pointer_gestures_v1` protocol through a narrowly patched Avalonia backend. It requires compositor support; the X11 compatibility backend does not supply native touchpad pinch. Windows handles precision-touchpad Ctrl+wheel and native zoom gestures when Windows delivers them. The user confirmed native Wayland two-finger pinch on the local Ubuntu 24.04 GNOME session; other hardware/compositors and physical Windows input remain unverified. Buttons and keyboard remain available. See [touchpad input](docs/touchpad-input.md), [Windows gestures](docs/windows-touchpad.md), [chart behavior](docs/chart-navigation.md) and [known issues](docs/KNOWN-ISSUES.md).
 
 Light and dark chart previews, using the same synthetic data:
 

@@ -71,6 +71,10 @@ state. Zooming pauses following live; End / Follow live restores it. Pinch does 
 extend the existing custom calculation selection. Two contacts do not also pan or
 select the chart.
 
+## Local physical-device result
+
+On 2026-10-27, the user confirmed that two-finger spread/pinch changes the chart time range in integrated build `d0f6e8b` on the local Ubuntu 24.04 GNOME session. The process ran with `--backend=wayland` and `DISPLAY` removed. Opt-in diagnostics recorded native `magnify` events; sampling continued after the update. Diagnostic tracing was disabled after this check. This confirms the local native input path, not every device, compositor or checklist condition below. Windows physical input remains unverified.
+
 ## Focused verification and device checklist
 
 Automated checks exercise fractional scrolling, Ctrl+horizontal scroll, pointer

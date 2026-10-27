@@ -160,7 +160,7 @@ WATTLEDGER_BACKEND=x11 wattledger-desktop
 | `Follow live` 或 End | 恢复跟随最新采样；全范围视图恢复跟随时使用最近 30 分钟 |
 | `Fit selection` / `Clear selection`、Escape | 放大到选区或清除选区；Escape 清除选区 |
 
-原生 Wayland 的双指捏合通过 compositor 的 `zwp_pointer_gestures_v1` 协议接入，需要桌面提供该协议；X11 兼容后端尚不提供原生触控板捏合。Windows 接入精密触控板生成的 Ctrl+滚轮与系统提供的原生缩放消息。实现和自动化检查已完成，真实设备覆盖仍待补充；缩放按钮与键盘继续可用。参见 [触控板输入](docs/touchpad-input.md) 与 [Windows 手势](docs/windows-touchpad.md)。
+原生 Wayland 的双指捏合通过 compositor 的 `zwp_pointer_gestures_v1` 协议接入，需要桌面提供该协议；X11 兼容后端尚不提供原生触控板捏合。Windows 接入精密触控板生成的 Ctrl+滚轮与系统提供的原生缩放消息。实现和自动化检查已完成；用户已在本机 Ubuntu 24.04 GNOME 原生 Wayland 会话确认双指捏合可用，其他设备 / 桌面和 Windows 实体输入仍待验证。缩放按钮与键盘继续可用。参见 [触控板输入](docs/touchpad-input.md) 与 [Windows 手势](docs/windows-touchpad.md)。
 
 图表工具栏只保留交互模式、缩放和实时跟随；“更多”菜单收纳前后平移、显示今天全部、适配选区和清除选区。“选区分析”可展开输入时间，选区统计始终可见。底部“应用”菜单集中导出、数据目录、登录时启动、托盘和退出等操作。
 
