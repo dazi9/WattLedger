@@ -143,7 +143,7 @@ These are power-rate estimates. They do not apply the ledger's capacity-delta fa
 2. **Capacity is quantized.** Many batteries update `RemainingCapacity` in 1% steps. Over a 5-second interval this can look like zero change; over minutes it is useful for calibration.
 3. **RAPL is package-only.** It does not include the display, storage, network, or VRM losses. Use it for breakdown and trends, not as the total.
 4. **Sampling gaps can be ambiguous.** A gap over 60 seconds retains Windows `ModernStandby` for compatibility. Linux notes a confirmed suspend/resume only when both logind events are observed and accepts any positive gap, including 60 seconds or less; unconfirmed gaps require more than 60 seconds and remain inferred. A paused process or scheduling delay can also cause an inferred gap. If capacity is missing, the existing session schema stores 0 Wh, but the note and report mark energy as unavailable/partial.
-5. **Per-app attribution is not in v0.1.** Windows does not expose a precise public per-app energy API. v0.2 will estimate CPU/GPU shares and label them as estimates.
+5. **Per-app attribution is not implemented yet.** A future implementation would estimate CPU/GPU shares and label them as estimates; it is not a feature of the current v0.2.x release.
 
 ## 7. Validation
 
@@ -170,7 +170,7 @@ and open an issue with the output (review it for personal data first).
 
 ## 8. Future per-app attribution
 
-The planned v0.2 approach:
+A possible future approach, not implemented in the current release:
 
 1. Sample each process's CPU time delta (`GetProcessTimes`) at the same cadence as the system sampler.
 2. Attribute CPU package power (`PP0`) proportionally to CPU time.
