@@ -101,7 +101,7 @@ public sealed class LinuxDesktopTests
         try
         {
             Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", "/tmp/wattledger-config");
-            Assert.Equal("/tmp/wattledger-config/autostart/wattledger.desktop", StartupRegistration.EntryPath);
+            Assert.Equal(Path.Combine("/tmp/wattledger-config", "autostart", "wattledger.desktop"), StartupRegistration.EntryPath);
 
             Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", "relative-config");
             Assert.Equal(Path.Combine(home, ".config", "autostart", "wattledger.desktop"), StartupRegistration.EntryPath);
@@ -126,7 +126,8 @@ public sealed class LinuxDesktopTests
             var endpoint = Path.Combine(runtimeDirectory, "wattledger-linux.sock");
 
             Assert.Null(SingleInstance.TryStart(() => { }));
-            Assert.True(activated.Wait(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
+            // The activate handshake runs on a background accept loop; allow for a busy test host.
+            Assert.True(activated.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 
             owner.Dispose();
             Assert.False(File.Exists(endpoint));
@@ -234,6 +235,10 @@ public sealed class LinuxDesktopTests
     {
         var root = Path.Combine(Path.GetTempPath(), $"wattledger-window-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
+        // Pin the language so localized-text assertions do not depend on the machine's UI culture.
+        var original = AppText.CurrentLanguage;
+        AppText.Initialize(new LanguagePreference(Path.Combine(root, "preferences.json")));
+        AppText.SetLanguage(AppLanguage.English);
         using var service = new WattLedgerService(Path.Combine(root, "ledger.sqlite"));
         service.Database.Initialize();
         var trayDetector = new TrayHostDetector();
@@ -303,6 +308,9 @@ public sealed class LinuxDesktopTests
         {
             await window.DisposeAsync();
             window.Hide();
+            AppText.SetLanguage(original);
+            AppText.Initialize();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(root, recursive: true);
         }
     }
@@ -312,6 +320,10 @@ public sealed class LinuxDesktopTests
     {
         var root = Path.Combine(Path.GetTempPath(), $"wattledger-chart-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
+        // Pin the language so localized-text assertions do not depend on the machine's UI culture.
+        var original = AppText.CurrentLanguage;
+        AppText.Initialize(new LanguagePreference(Path.Combine(root, "preferences.json")));
+        AppText.SetLanguage(AppLanguage.English);
         using var service = new WattLedgerService(Path.Combine(root, "ledger.sqlite"));
         service.Database.Initialize();
         var start = new DateTimeOffset(DateTime.Today);
@@ -363,13 +375,16 @@ public sealed class LinuxDesktopTests
                 Dispatcher.UIThread.RunJobs();
                 using var bitmap = window.CaptureRenderedFrame();
                 Assert.NotNull(bitmap);
-                bitmap.Save(path);
+                bitmap.Save(path, PngBitmapEncoderOptions.Default);
             }
         }
         finally
         {
             await window.DisposeAsync();
             window.Hide();
+            AppText.SetLanguage(original);
+            AppText.Initialize();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(root, recursive: true);
         }
     }
@@ -406,6 +421,10 @@ public sealed class LinuxDesktopTests
     {
         var root = Path.Combine(Path.GetTempPath(), $"wattledger-range-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
+        // Pin the language so localized-text assertions do not depend on the machine's UI culture.
+        var original = AppText.CurrentLanguage;
+        AppText.Initialize(new LanguagePreference(Path.Combine(root, "preferences.json")));
+        AppText.SetLanguage(AppLanguage.English);
         using var service = new WattLedgerService(Path.Combine(root, "ledger.sqlite"));
         service.Database.Initialize();
         var start = new DateTimeOffset(DateTime.Today);
@@ -438,6 +457,8 @@ public sealed class LinuxDesktopTests
         {
             await window.DisposeAsync();
             window.Hide();
+            AppText.SetLanguage(original);
+            AppText.Initialize();
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(root, recursive: true);
         }

@@ -46,7 +46,7 @@ public sealed class ThemeTests
                 if (Environment.GetEnvironmentVariable("WATTLEDGER_THEME_SCREENSHOT_DIR") is { Length: > 0 } directory)
                 {
                     Directory.CreateDirectory(directory);
-                    bitmap.Save(Path.Combine(directory, $"theme-{variant.Key.ToString()!.ToLowerInvariant()}.png"));
+                    bitmap.Save(Path.Combine(directory, $"theme-{variant.Key.ToString()!.ToLowerInvariant()}.png"), PngBitmapEncoderOptions.Default);
                 }
             }
         }

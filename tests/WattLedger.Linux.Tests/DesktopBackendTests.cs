@@ -44,18 +44,24 @@ public sealed class DesktopBackendTests
         Assert.True(DesktopBackendOptions.Parse(["--help"], null).ShowHelp);
     }
 
+    // /run/user/<uid>-style paths are only fully qualified on POSIX; pick an absolute path
+    // with the running platform's rules so the resolution tests run on any host OS.
+    private static string RuntimeDirectory { get; } = OperatingSystem.IsWindows()
+        ? Path.Combine(Path.GetTempPath(), "wattledger-runtime-1000")
+        : "/run/user/1000";
+
     [Fact]
     public void AutoPrefersNativeWaylandWhenSessionSocketExists()
     {
-        var environment = new DesktopDisplayEnvironment(":0", "wayland-1", "/run/user/1000");
-        Assert.Equal(DesktopBackend.Wayland, environment.Resolve(DesktopBackend.Auto, path => path == "/run/user/1000/wayland-1"));
+        var environment = new DesktopDisplayEnvironment(":0", "wayland-1", RuntimeDirectory);
+        Assert.Equal(DesktopBackend.Wayland, environment.Resolve(DesktopBackend.Auto, path => path == Path.Combine(RuntimeDirectory, "wayland-1")));
         Assert.Equal(DesktopBackend.X11, environment.Resolve(DesktopBackend.X11, _ => true));
     }
 
     [Fact]
     public void AutoFallsBackToX11ForMissingWaylandSocket()
     {
-        var environment = new DesktopDisplayEnvironment(":0", "wayland-stale", "/run/user/1000");
+        var environment = new DesktopDisplayEnvironment(":0", "wayland-stale", RuntimeDirectory);
         Assert.Equal(DesktopBackend.X11, environment.Resolve(DesktopBackend.Auto, _ => false));
         var error = Assert.Throws<InvalidOperationException>(() => environment.Resolve(DesktopBackend.Wayland, _ => false));
         Assert.Contains("--backend=x11", error.Message);
@@ -65,7 +71,7 @@ public sealed class DesktopBackendTests
     [Fact]
     public void AutoDoesNotSelectUnrelatedCompositorInX11Session()
     {
-        var environment = new DesktopDisplayEnvironment(":0", null, "/run/user/1000", "x11");
+        var environment = new DesktopDisplayEnvironment(":0", null, RuntimeDirectory, "x11");
         Assert.Equal(DesktopBackend.X11, environment.Resolve(DesktopBackend.Auto, _ => true));
         Assert.Equal(DesktopBackend.Wayland, environment.Resolve(DesktopBackend.Wayland, _ => true));
     }
@@ -73,15 +79,16 @@ public sealed class DesktopBackendTests
     [Fact]
     public void WaylandSessionCanUseDefaultDisplayName()
     {
-        var environment = new DesktopDisplayEnvironment(null, null, "/run/user/1000", "wayland");
-        Assert.Equal(DesktopBackend.Wayland, environment.Resolve(DesktopBackend.Auto, path => path.EndsWith("/wayland-0")));
+        var environment = new DesktopDisplayEnvironment(null, null, RuntimeDirectory, "wayland");
+        Assert.Equal(DesktopBackend.Wayland, environment.Resolve(DesktopBackend.Auto, path => path == Path.Combine(RuntimeDirectory, "wayland-0")));
     }
 
     [Fact]
     public void AbsoluteWaylandDisplayDoesNotRequireRuntimeDirectory()
     {
-        var environment = new DesktopDisplayEnvironment(null, "/tmp/custom-wayland", null);
-        Assert.Equal(DesktopBackend.Wayland, environment.Resolve(DesktopBackend.Auto, path => path == "/tmp/custom-wayland"));
+        var absoluteDisplay = Path.GetFullPath("custom-wayland");
+        var environment = new DesktopDisplayEnvironment(null, absoluteDisplay, null);
+        Assert.Equal(DesktopBackend.Wayland, environment.Resolve(DesktopBackend.Auto, path => path == absoluteDisplay));
     }
 
     [Fact]

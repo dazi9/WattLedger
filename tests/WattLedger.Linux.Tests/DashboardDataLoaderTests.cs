@@ -91,6 +91,8 @@ public sealed class DashboardDataLoaderTests
         public void Dispose()
         {
             Service.Dispose();
+            // Pooled SQLite connections keep the file open on Windows; drop them before deleting.
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(_root, recursive: true);
         }
     }
