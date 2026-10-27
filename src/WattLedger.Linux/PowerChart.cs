@@ -33,12 +33,26 @@ internal sealed class PowerChart : Control
     private ChartTimeRange _dragRange;
     private bool _panning;
     private ChartInteractionMode _interactionMode;
+    private readonly ChartScaleSession _pinchScale = new();
+    private readonly HashSet<IPointer> _touchContacts = [];
+    private bool _pinching;
+    private ulong _lastMagnifyTimestamp;
+    private readonly bool _traceInput = Environment.GetEnvironmentVariable("WATTLEDGER_INPUT_TRACE") == "1";
 
     public PowerChart()
     {
         Focusable = true;
         ClipToBounds = true;
         UpdateCursor();
+        GestureRecognizers.Add(new PinchGestureRecognizer());
+        AddHandler(PinchEvent, OnPinch);
+        AddHandler(PinchEndedEvent, OnPinchEnded);
+        AddHandler(PointerTouchPadGestureMagnifyEvent, OnTouchPadMagnify);
+        DetachedFromVisualTree += (_, _) =>
+        {
+            _touchContacts.Clear();
+            EndPinch();
+        };
         ActualThemeVariantChanged += (_, _) =>
         {
             _layout = null;
@@ -144,14 +158,77 @@ internal sealed class PowerChart : Control
         var layout = EnsureLayout();
         var point = e.GetPosition(this);
         if (!InPlot(point, layout)) return;
-        // A two-finger horizontal scroll moves the plotted content with the gesture.
-        // Prefer the dominant axis so a little diagonal noise does not zoom while panning.
-        if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && Math.Abs(e.Delta.X) > Math.Abs(e.Delta.Y))
-            Pan(-Math.Clamp(e.Delta.X, -5, 5) * VisibleRange.Seconds * .1);
-        else if (e.Delta.Y != 0)
-            ZoomAt(Math.Pow(.8, Math.Clamp(e.Delta.Y, -5, 5)), (point.X - layout.PlotLeft) / (layout.PlotRight - layout.PlotLeft));
-        else return;
+        // A backend can emit a compatibility wheel packet for the same native magnify.
+        if (_pinching || (e.Timestamp != 0 && e.Timestamp == _lastMagnifyTimestamp))
+        {
+            e.Handled = true;
+            return;
+        }
+        var x = double.IsFinite(e.Delta.X) ? e.Delta.X : 0;
+        var y = double.IsFinite(e.Delta.Y) ? e.Delta.Y : 0;
+        var control = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        // Keep sub-detent touchpad values intact. Ctrl explicitly requests zoom even
+        // when a backend reports the continuous gesture on the horizontal axis only.
+        if (!control && Math.Abs(x) > Math.Abs(y))
+            Pan(-Math.Clamp(x, -5, 5) * VisibleRange.Seconds * .1);
+        else
+        {
+            var steps = y != 0 ? y : control ? x : 0;
+            if (!ApplyGestureZoom(ChartGestureScale.WheelFactor(steps), point, layout)) return;
+        }
+        if (_traceInput) Console.Error.WriteLine($"WattLedger input: wheel x={x:R} y={y:R} ctrl={control} span={VisibleRange.Seconds:R}s");
         e.Handled = true;
+    }
+
+    private void OnTouchPadMagnify(object? sender, PointerDeltaEventArgs e)
+    {
+        var layout = EnsureLayout();
+        var point = e.GetPosition(this);
+        if (_pinching || !InPlot(point, layout)) return;
+        // Avalonia's native magnify event carries a per-packet magnification delta,
+        // not the cumulative Scale used by the multi-contact Pinch recognizer.
+        var delta = e.Delta.Y != 0 ? e.Delta.Y : e.Delta.X;
+        var factor = ChartGestureScale.MagnificationFactor(1 + delta);
+        if (!ApplyGestureZoom(factor, point, layout)) return;
+        _lastMagnifyTimestamp = e.Timestamp;
+        _dragStart = null;
+        if (_traceInput) Console.Error.WriteLine($"WattLedger input: magnify delta={delta:R} factor={factor:R} span={VisibleRange.Seconds:R}s");
+        e.Handled = true;
+    }
+
+    private void OnPinch(object? sender, PinchEventArgs e)
+    {
+        var layout = EnsureLayout();
+        if (!InPlot(e.ScaleOrigin, layout)) return;
+        if (!_pinching)
+        {
+            _pinching = true;
+            _pinchScale.Begin();
+            _dragStart = null;
+        }
+        var factor = _pinchScale.Update(e.Scale);
+        ApplyGestureZoom(factor, e.ScaleOrigin, layout);
+        if (_traceInput) Console.Error.WriteLine($"WattLedger input: contact-pinch scale={e.Scale:R} factor={factor:R} span={VisibleRange.Seconds:R}s");
+        e.Handled = true;
+    }
+
+    private void OnPinchEnded(object? sender, PinchEndedEventArgs e)
+    {
+        EndPinch();
+        e.Handled = true;
+    }
+
+    private void EndPinch()
+    {
+        _pinching = false;
+        _pinchScale.End();
+    }
+
+    private bool ApplyGestureZoom(double factor, Point point, PowerChartLayout layout)
+    {
+        if (!double.IsFinite(factor) || factor <= 0 || factor == 1) return false;
+        ZoomAt(factor, (point.X - layout.PlotLeft) / (layout.PlotRight - layout.PlotLeft));
+        return true;
     }
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
@@ -159,6 +236,15 @@ internal sealed class PowerChart : Control
         var point = e.GetPosition(this);
         var layout = EnsureLayout();
         if (!InPlot(point, layout)) return;
+        if (e.Pointer.Type is PointerType.Touch or PointerType.Pen)
+        {
+            _touchContacts.Add(e.Pointer);
+            if (_touchContacts.Count > 1)
+            {
+                _dragStart = null;
+                return;
+            }
+        }
         var properties = e.GetCurrentPoint(this).Properties;
         if (!properties.IsLeftButtonPressed && !properties.IsMiddleButtonPressed) return;
         Focus();
@@ -187,6 +273,7 @@ internal sealed class PowerChart : Control
         base.OnPointerMoved(e);
         var point = e.GetPosition(this);
         var layout = EnsureLayout();
+        if (_touchContacts.Count > 1 || _pinching) _dragStart = null;
         if (_dragStart is { } drag)
         {
             if (_state.IsFollowingLive)
@@ -207,7 +294,7 @@ internal sealed class PowerChart : Control
                 InvalidateVisual();
             }
         }
-        var hover = !(_dragStart is not null && _panning) && InPlot(point, layout)
+        var hover = !_pinching && !(_dragStart is not null && _panning) && InPlot(point, layout)
             ? ChartSeries.Nearest(_samples, TimeAt(point.X, layout), VisibleRange) : null;
         if (_hover != hover)
         {
@@ -219,10 +306,11 @@ internal sealed class PowerChart : Control
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
-        if (_dragStart is null) return;
+        _touchContacts.Remove(e.Pointer);
+        var wasDragging = _dragStart is not null;
         _dragStart = null;
-        e.Pointer.Capture(null);
-        e.Handled = true;
+        if (e.Pointer.Captured == this) e.Pointer.Capture(null);
+        if (wasDragging) e.Handled = true;
     }
     protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
     {
