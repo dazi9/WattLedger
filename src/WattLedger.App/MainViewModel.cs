@@ -7,6 +7,7 @@ using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
 using WattLedger.Core.Reporting;
 using WattLedger.Desktop;
+using static WattLedger.Desktop.AppText;
 
 namespace WattLedger.App;
 
@@ -21,19 +22,20 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly WattLedgerService _service;
     private readonly DashboardDataLoader _dataLoader;
     private string _powerText = "—";
-    private string _powerDetailText = "Waiting for the first sample";
+    private string _powerDetailText = Get("Waiting for the first sample");
     private string _batteryText = "—";
     private string _batteryDetailText = "—";
     private string _timeLeftText = "—";
     private string _timeLeftDetailText = "—";
     private string _todayEnergyText = "—";
     private string _todayDetailText = "—";
-    private string _stateText = "STARTING";
-    private string _statusText = "Collecting the first sample…";
+    private string _stateText = Get("STARTING");
+    private string _statusText = Get("Collecting the first sample…");
     private Brush _powerBrush = GreenBrush;
     private Brush _stateBrush = BlueBrush;
     private IReadOnlyList<PowerPoint> _chartSamples = Array.Empty<PowerPoint>();
     private string? _startupError;
+    private DayReport? _lastReport;
 
     public MainViewModel(WattLedgerService service)
     {
@@ -44,11 +46,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher is null || dispatcher.CheckAccess())
             {
-                StatusText = $"Sampling error: {message}";
+                StatusText = Format("Sampling error: {0}", message);
             }
             else
             {
-                dispatcher.BeginInvoke(() => StatusText = $"Sampling error: {message}");
+                dispatcher.BeginInvoke(() => StatusText = Format("Sampling error: {0}", message));
             }
         };
     }
@@ -145,17 +147,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            StatusText = $"Sampling error: {ex.Message}";
+            StatusText = Format("Sampling error: {0}", ex.Message);
         }
     }
 
     public void SetStartupFailure(string message)
     {
         _startupError = message;
-        StateText = "NOT RECORDING";
+        StateText = Get("NOT RECORDING");
         StateBrush = RedBrush;
-        PowerDetailText = "Sampler could not start";
-        StatusText = $"Not recording: {message}";
+        PowerDetailText = Get("Sampler could not start");
+        StatusText = Format("Not recording: {0}", message);
     }
 
     public async Task RefreshReportAsync()
@@ -164,37 +166,56 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             var snapshot = await Task.Run(() => _dataLoader.Load(DateTimeOffset.Now));
             var report = snapshot.Report;
-            TodayEnergyText = $"{report.DischargeWh:0.0} Wh";
-            TodayDetailText = $"active {ReportBuilder.FormatDuration(report.ActiveSeconds)} · standby {ReportBuilder.FormatDuration(report.StandbySeconds)}";
-
-            Sessions.Clear();
-            foreach (var session in report.Sessions
-                         .Where(s => s.DurationSeconds > 0)
-                         .OrderByDescending(s => s.Start)
-                         .Take(60))
-            {
-                Sessions.Add(new SessionRow(
-                    session.Start.ToLocalTime().ToString("HH:mm:ss"),
-                    session.End.ToLocalTime().ToString("HH:mm:ss"),
-                    ReportBuilder.StateLabel(session.Type),
-                    ReportBuilder.FormatDuration(session.DurationSeconds),
-                    $"{FormatPercent(session.StartPercent)} → {FormatPercent(session.EndPercent)}",
-                    $"{session.EnergyWh:0.00} Wh",
-                    $"{session.AverageWatts:0.0} W"));
-            }
+            ApplyReport(report);
 
             ChartSamples = snapshot.Samples;
 
             if (_startupError is null)
             {
                 if (_service.Latest is { } latest) ApplyStatus(latest);
-                else StatusText = "Waiting for the first sample…";
+                else StatusText = Get("Waiting for the first sample…");
             }
             ChartUpdated?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex)
         {
-            StatusText = $"Report error: {ex.Message}";
+            StatusText = Format("Report error: {0}", ex.Message);
+        }
+    }
+
+    private void ApplyReport(DayReport report)
+    {
+        _lastReport = report;
+        TodayEnergyText = $"{report.DischargeWh:0.0} Wh";
+        TodayDetailText = Format("active {0} · standby {1}", ReportBuilder.FormatDuration(report.ActiveSeconds), ReportBuilder.FormatDuration(report.StandbySeconds));
+
+        Sessions.Clear();
+        foreach (var session in report.Sessions
+                     .Where(s => s.DurationSeconds > 0)
+                     .OrderByDescending(s => s.Start)
+                     .Take(60))
+        {
+            Sessions.Add(new SessionRow(
+                session.Start.ToLocalTime().ToString("HH:mm:ss"),
+                session.End.ToLocalTime().ToString("HH:mm:ss"),
+                AppText.SessionState(session.Type),
+                ReportBuilder.FormatDuration(session.DurationSeconds),
+                $"{FormatPercent(session.StartPercent)} → {FormatPercent(session.EndPercent)}",
+                $"{session.EnergyWh:0.00} Wh",
+                $"{session.AverageWatts:0.0} W"));
+        }
+    }
+
+    public void RefreshLanguage()
+    {
+        if (_lastReport is { } report) ApplyReport(report);
+        if (_startupError is not null) SetStartupFailure(_startupError);
+        else if (_service.Latest is { } status) ApplyStatus(status);
+        else
+        {
+            PowerDetailText = Get("Waiting for the first sample");
+            StateText = Get("STARTING");
+            StatusText = Get("Collecting the first sample…");
         }
     }
 
@@ -228,18 +249,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         PowerDetailText = status.Rapl.PackageWatts is { } package
             ? $"SoC {package:0.0} W · CPU {status.Rapl.CpuWatts.GetValueOrDefault():0.0} W · GPU {status.Rapl.GpuWatts.GetValueOrDefault():0.0} W"
-            : "RAPL / Energy Meter unavailable";
+            : Get("RAPL / Energy Meter unavailable");
 
         if (powerEstimated)
         {
-            PowerDetailText += " · estimated from capacity";
+            PowerDetailText += Get(" · estimated from capacity");
         }
 
         BatteryText = FormatPercent(battery.Percent);
 
-        var health = battery.HealthPercent is { } h ? $"{h:0.0}% health" : "health unknown";
-        if (battery.PercentIsEstimated) health += " · estimated";
-        var cycles = battery.CycleCount is { } c ? $" · {c} cycles" : "";
+        var health = battery.HealthPercent is { } h ? Format("{0:0.0}% health", h) : Get("health unknown");
+        if (battery.PercentIsEstimated) health += Get(" · estimated");
+        var cycles = battery.CycleCount is { } c ? Format(" · {0} cycles", c) : "";
         BatteryDetailText = battery.RemainingCapacityMwh is { } remaining && battery.FullChargeCapacityMwh is { } full
             ? $"{remaining / 1000.0:0.0} / {full / 1000.0:0.0} Wh · {health}{cycles}"
             : $"{health}{cycles}";
@@ -248,8 +269,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             TimeLeftText = $"{hours:0.0} h";
             TimeLeftDetailText = status.RecentAverageWatts is { } average
-                ? $"recent average {average:0.0} W"
-                : "integrating recent samples";
+                ? Format("recent average {0:0.0} W", average)
+                : Get("integrating recent samples");
         }
         else if (battery.IsCharging &&
                  battery.ChargeWatts is { } chargeWatts &&
@@ -259,27 +280,27 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             var hoursToFull = (fullCharge - remainingCharge) / 1000.0 / chargeWatts;
             TimeLeftText = $"{Math.Max(0, hoursToFull):0.0} h";
-            TimeLeftDetailText = $"estimated to full · charging at {chargeWatts:0.0} W";
+            TimeLeftDetailText = Format("estimated to full · charging at {0:0.0} W", chargeWatts);
         }
         else
         {
-            TimeLeftText = battery.IsAcOnline ? "AC" : "—";
-            TimeLeftDetailText = battery.IsAcOnline ? "plugged in" : "waiting for power data";
+            TimeLeftText = battery.IsAcOnline ? Get("AC") : "—";
+            TimeLeftDetailText = battery.IsAcOnline ? Get("plugged in") : Get("waiting for power data");
         }
 
-        StateText = battery.BatteryCount == 0 ? "NO BATTERY"
-            : battery.IsCharging ? "CHARGING"
-            : battery.IsDischarging ? "ON BATTERY"
-            : battery.IsAcOnline ? "AC POWER" : "STATE UNKNOWN";
+        StateText = battery.BatteryCount == 0 ? Get("NO BATTERY")
+            : battery.IsCharging ? Get("CHARGING")
+            : battery.IsDischarging ? Get("ON BATTERY")
+            : battery.IsAcOnline ? Get("AC POWER") : Get("STATE UNKNOWN");
         StateBrush = battery.IsCharging || battery.IsAcOnline ? BlueBrush
             : battery.IsDischarging ? GreenBrush : MutedBrush;
         StatusText = battery.IsCharging || battery.IsDischarging || battery.IsAcOnline
-            ? $"Recording locally · last sample {status.Timestamp.ToLocalTime():HH:mm:ss}"
-            : $"State unavailable · session tracking paused · last reading {status.Timestamp.ToLocalTime():HH:mm:ss}";
+            ? Format("Recording locally · last sample {0:HH:mm:ss}", status.Timestamp.ToLocalTime())
+            : Format("State unavailable · session tracking paused · last reading {0:HH:mm:ss}", status.Timestamp.ToLocalTime());
 
         if (status.BrightnessPercent is { } brightness)
         {
-            PowerDetailText += $" · {brightness}% brightness";
+            PowerDetailText += Format(" · {0}% brightness", brightness);
         }
 
         if (status.ForegroundProcess is { Length: > 0 } process)

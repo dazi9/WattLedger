@@ -28,4 +28,9 @@
   <ItemGroup>
     <Compile Include="../WattLedger.Desktop/ThemePreference.cs" Link="ThemePreference.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../WattLedger.Desktop/AppText.cs" Link="Shared/AppText.cs" />
+    <Compile Include="../WattLedger.Desktop/LanguagePreference.cs" Link="Shared/LanguagePreference.cs" />
+    <EmbeddedResource Include="../WattLedger.Desktop/Strings.zh-CN.json" LogicalName="WattLedger.Desktop.Strings.zh-CN.json" WithCulture="false" />
+  </ItemGroup>
 </Project>

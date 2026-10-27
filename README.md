@@ -16,12 +16,13 @@ The current source version is **0.2.1**. Check [Releases](https://github.com/daz
 - **Energy ledger:** active, AC, charging and sleep/standby sessions with durations, energy and battery changes; daily reports respect local midnight and daylight-saving boundaries.
 - **Interactive charts on both desktops:** pan, zoom, original-point inspection, custom time ranges, energy/average-power/coverage statistics and follow-live views.
 - **Light, Dark and System appearance:** persistent settings, shared colors and live theme updates where the desktop exposes them.
+- **English and Simplified Chinese UI:** choose System / English / 简体中文; switch immediately and keep the preference across restarts.
 - **Battery health:** design/full-charge capacity, optional cycle count and stored health history.
 - **Local history and exports:** SQLite, CSV samples, and JSON/Markdown reports.
 - **Windows hardware context:** Energy Meter/RAPL package, CPU, GPU and DRAM readings where supported, plus optional brightness and foreground-process context.
 - **Linux desktop integration:** sysfs battery readings, logind suspend/resume notifications, native Wayland or X11, optional tray and user-scoped start at login.
 
-Per-app energy attribution, a multi-day desktop chart browser, standby alerts and a Chinese application UI are **not implemented yet**.
+Per-app energy attribution, a multi-day desktop chart browser and standby alerts are **not implemented yet**.
 
 ## Platform support and requirements
 
@@ -107,14 +108,14 @@ Both desktops use shared chart calculations and interaction state. The chart cov
 |---|---|
 | **Pan**, then ordinary left drag | Move through the recorded range; drag right for earlier samples. |
 | **Earlier / Later** or Left / Right keys | Pan the visible window; boundary labels explain when no more data is available. |
-| Horizontal scroll | Pan. Physical touchpad behavior remains under investigation; see the limitation below. |
+| Horizontal scroll | Pan; Ctrl+scroll zooms, including fractional wheel deltas. |
 | Vertical wheel, **+/−** buttons or keys | Zoom; wheel zoom is anchored to the pointer. |
 | **Select**, then left drag | Pick original timestamps and calculate the selected interval. |
 | Shift + left drag or middle drag | Temporarily pan, including in Select mode. |
 | **Fit today**, double-click or Home | Fit the currently loaded day and pause following. |
 | **Follow live** or End | Follow new samples again. A plain click does not pause following; dragging or navigation does. |
-| **Fit selection / Clear selection**, Escape | Fit the selection or clear it. |
-| From / To + **Calculate** | Enter `HH:mm` or `HH:mm:ss` within the same local day. Cross-midnight input is rejected. |
+| **More → Fit selection / Clear selection**, Escape | Fit the selection or clear it. |
+| **Selection analysis →** From / To + **Calculate** | Enter `HH:mm` or `HH:mm:ss` within the same local day. Cross-midnight input is rejected. |
 
 Hover shows the original sample timestamp, watts and battery percentage. **Positive watts mean discharge; negative watts mean charging**, including the live card and tray tooltip. The power axis adapts to the viewport; battery percentage stays at 0–100%.
 
@@ -122,7 +123,11 @@ Selection summaries show discharged/charged energy, signed net Wh, time-weighted
 
 Choose **System / Light / Dark** in the footer's Theme selector. The choice persists across restarts. System mode follows the appearance supplied by the platform; choose Light or Dark explicitly if the desktop does not expose a theme preference.
 
-The user has reported that Linux touchpad zoom does not work as expected. Pinch/precision-touchpad zoom and Windows gesture parity are **next-iteration work**; mouse-wheel handlers and automated input checks do not establish full touchpad support. Until then, use the zoom buttons or keyboard. See [chart behavior](docs/chart-navigation.md), [themes](docs/theme-modes.md) and [known issues](docs/KNOWN-ISSUES.md).
+Choose **System / English / 简体中文** beside Theme to change the interface language immediately. Chinese system locales select Simplified Chinese in System mode; other locales use English. Numeric formats and manual `HH:mm[:ss]` input retain their existing rules; database records, CLI output and export field names stay stable. See [application language](docs/app-localization.md).
+
+The compact chart toolbar keeps the interaction mode, zoom and follow-live controls visible. **More** holds earlier/later navigation, fit and clear actions; expand **Selection analysis** for manual time entry. **Application** groups exports, data folder, start at login, tray and quit.
+
+Native Wayland pinch now uses the compositor's `zwp_pointer_gestures_v1` protocol through a narrowly patched Avalonia backend. It requires compositor support; the X11 compatibility backend does not supply native touchpad pinch. Windows handles precision-touchpad Ctrl+wheel and native zoom gestures when Windows delivers them. Physical device coverage is still pending; buttons and keyboard remain available. See [touchpad input](docs/touchpad-input.md), [Windows gestures](docs/windows-touchpad.md), [chart behavior](docs/chart-navigation.md) and [known issues](docs/KNOWN-ISSUES.md).
 
 Light and dark chart previews, using the same synthetic data:
 
@@ -214,7 +219,7 @@ Core has no UI dependency. Both desktop projects compile-link the shared present
 
 For synthetic demo data, quit any existing desktop instance, run `python tools/seed-demo.py --db demo.db`, then launch a desktop with `--db demo.db`. The script refuses the production name `wattledger.db` unless explicitly forced.
 
-Next iteration: investigate Linux touchpad zoom and Windows gesture parity, and add a Simplified Chinese application UI. Later candidates include historical/multi-day desktop navigation, per-app **estimated** attribution, alerts, additional packaging/architectures and broader hardware validation; these are not promises tied to an already released version. See [the iteration plan](docs/NEXT-ITERATION.md), [known issues](docs/KNOWN-ISSUES.md), [changelog](CHANGELOG.md) and [contributing guide](CONTRIBUTING.md).
+Later candidates include historical/multi-day desktop navigation, per-app **estimated** attribution, alerts, additional packaging/architectures and broader hardware validation; these are not promises tied to an already released version. See [the iteration plan](docs/NEXT-ITERATION.md), [known issues](docs/KNOWN-ISSUES.md), [changelog](CHANGELOG.md) and [contributing guide](CONTRIBUTING.md).
 
 For reports, include the laptop/OS/desktop details and reviewed `wattledger diag` output. Keep personal database contents and serial numbers out of public attachments.
 

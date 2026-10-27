@@ -102,6 +102,13 @@ internal sealed class PowerChart : Control
         }
     }
 
+    public void RefreshLanguage()
+    {
+        _layout = null;
+        _hoverText = null;
+        InvalidateVisual();
+    }
+
     public void Zoom(double factor) => ZoomAt(factor, .5);
     public void ResetView()
     {
@@ -405,14 +412,14 @@ internal sealed class PowerChart : Control
         }
         if (_hover is { } hovered && hovered.Timestamp >= layout.TimeStart && hovered.Timestamp <= layout.TimeEnd)
         {
-            var power = hovered.Watts is { } watts ? $"{watts:+0.00;-0.00;0.00} W" : "power unavailable";
-            var percent = hovered.BatteryPercent is { } battery ? $"{battery}%" : "battery unavailable";
+            var power = hovered.Watts is { } watts ? $"{watts:+0.00;-0.00;0.00} W" : AppText.Get("power unavailable");
+            var percent = hovered.BatteryPercent is { } battery ? $"{battery}%" : AppText.Get("battery unavailable");
             var text = _hoverText ??= Text($"{hovered.Timestamp.ToLocalTime():MM-dd HH:mm:ss}  ·  {power}  ·  {percent}", 11);
             var x = Math.Max(layout.PlotLeft, Math.Min(XAt(hovered.Timestamp, layout) + 10, Bounds.Width - text.Width - 12));
             context.DrawRectangle(HoverBrush, null, new Rect(x - 5, layout.PlotTop + 4, text.Width + 10, text.Height + 8), 4, 4);
             context.DrawText(text, new Point(x, layout.PlotTop + 8));
         }
-        if (layout.ActualStart is null) context.DrawText(Text("No samples in this range", 12), new Point(layout.PlotLeft + 10, layout.PlotTop + 12));
+        if (layout.ActualStart is null) context.DrawText(Text(AppText.Get("No samples in this range"), 12), new Point(layout.PlotLeft + 10, layout.PlotTop + 12));
     }
 
     private PowerChartLayout EnsureLayout()
