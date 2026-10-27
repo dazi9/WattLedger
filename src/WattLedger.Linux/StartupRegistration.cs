@@ -50,14 +50,15 @@ internal static class StartupRegistration
     internal static string BuildDesktopEntry(IEnumerable<string> arguments)
     {
         var exec = BuildExecValue(arguments);
+        // Desktop entry files are LF-separated by spec; AppendLine would emit CRLF on Windows.
         return new StringBuilder()
-            .AppendLine("[Desktop Entry]")
-            .AppendLine("Type=Application")
-            .AppendLine("Name=WattLedger")
-            .AppendLine("Comment=Local battery energy journal")
-            .AppendLine($"Exec={exec}")
-            .AppendLine("Terminal=false")
-            .AppendLine("X-GNOME-Autostart-enabled=true")
+            .Append("[Desktop Entry]\n")
+            .Append("Type=Application\n")
+            .Append("Name=WattLedger\n")
+            .Append("Comment=Local battery energy journal\n")
+            .Append($"Exec={exec}\n")
+            .Append("Terminal=false\n")
+            .Append("X-GNOME-Autostart-enabled=true\n")
             .ToString();
     }
 
