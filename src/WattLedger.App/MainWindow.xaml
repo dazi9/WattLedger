@@ -25,7 +25,7 @@
         <Grid Grid.Row="0">
             <StackPanel>
                 <TextBlock Text="WattLedger" Style="{StaticResource TitleText}" />
-                <TextBlock Text="Local-first battery energy journal" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
+                <TextBlock Text="{local:Translate Text=&quot;Local-first battery energy journal&quot;}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
             </StackPanel>
 
             <Border HorizontalAlignment="Right"
@@ -49,7 +49,7 @@
         <UniformGrid Grid.Row="1" Columns="4" Margin="0,22,0,0">
             <Border Style="{StaticResource Card}" Margin="0,0,12,0">
                 <StackPanel>
-                    <TextBlock Text="LIVE POWER" Style="{StaticResource MetricLabel}" />
+                    <TextBlock Text="{local:Translate Text=&quot;LIVE POWER&quot;}" Style="{StaticResource MetricLabel}" />
                     <TextBlock Text="{Binding PowerText}" Style="{StaticResource MetricValue}" Foreground="{Binding PowerBrush}" Margin="0,6,0,0" />
                     <TextBlock Text="{Binding PowerDetailText}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
                 </StackPanel>
@@ -57,7 +57,7 @@
 
             <Border Style="{StaticResource Card}" Margin="0,0,12,0">
                 <StackPanel>
-                    <TextBlock Text="BATTERY" Style="{StaticResource MetricLabel}" />
+                    <TextBlock Text="{local:Translate Text=&quot;BATTERY&quot;}" Style="{StaticResource MetricLabel}" />
                     <TextBlock Text="{Binding BatteryText}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                     <TextBlock Text="{Binding BatteryDetailText}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
                 </StackPanel>
@@ -65,7 +65,7 @@
 
             <Border Style="{StaticResource Card}" Margin="0,0,12,0">
                 <StackPanel>
-                    <TextBlock Text="TIME LEFT" Style="{StaticResource MetricLabel}" />
+                    <TextBlock Text="{local:Translate Text=&quot;TIME LEFT&quot;}" Style="{StaticResource MetricLabel}" />
                     <TextBlock Text="{Binding TimeLeftText}" Style="{StaticResource MetricValue}" Foreground="{DynamicResource BlueBrush}" Margin="0,6,0,0" />
                     <TextBlock Text="{Binding TimeLeftDetailText}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
                 </StackPanel>
@@ -73,7 +73,7 @@
 
             <Border Style="{StaticResource Card}">
                 <StackPanel>
-                    <TextBlock Text="TODAY" Style="{StaticResource MetricLabel}" />
+                    <TextBlock Text="{local:Translate Text=&quot;TODAY&quot;}" Style="{StaticResource MetricLabel}" />
                     <TextBlock Text="{Binding TodayEnergyText}" Style="{StaticResource MetricValue}" Foreground="{DynamicResource GreenBrush}" Margin="0,6,0,0" />
                     <TextBlock Text="{Binding TodayDetailText}" Style="{StaticResource SubtleText}" Margin="0,4,0,0" />
                 </StackPanel>
@@ -82,32 +82,51 @@
 
         <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,12,0,0">
             <StackPanel>
-                <TextBlock Text="Power &amp; battery · today" Style="{StaticResource SectionTitle}" />
-                <TextBlock Text="Power: + discharge / − charging · blue dashed line: battery %" Style="{StaticResource SubtleText}" Margin="0,4,0,6" />
-                <WrapPanel>
-                    <Button x:Name="PanModeButton" Content="Pan ✓" Click="PanMode_Click" />
-                    <Button x:Name="SelectModeButton" Content="Select points" Click="SelectMode_Click" />
-                    <Button x:Name="EarlierButton" Content="← Earlier" Click="Earlier_Click" />
-                    <Button x:Name="LaterButton" Content="Later →" Click="Later_Click" />
-                    <Button Content="+" ToolTip="Zoom in" Click="ZoomIn_Click" />
-                    <Button Content="−" ToolTip="Zoom out" Click="ZoomOut_Click" />
-                    <Button Content="Fit today" Click="ResetChart_Click" />
-                    <Button x:Name="FollowButton" Content="Following live" Click="FollowLive_Click" />
-                    <Button Content="Fit selection" Click="FitSelection_Click" />
-                    <Button Content="Clear selection" Click="ClearSelection_Click" />
+                <TextBlock Text="{local:Translate Text=&quot;Power &amp; battery · today&quot;}" Style="{StaticResource SectionTitle}"
+                           ToolTip="{local:Translate Text=&quot;Power: + discharge / − charging · blue dashed line: battery %&quot;}" />
+                <WrapPanel Margin="0,8,0,0">
+                    <ComboBox x:Name="ChartModeSelector" Width="150" Margin="0,0,8,0" VerticalAlignment="Center"
+                              SelectedValuePath="Tag" SelectionChanged="ChartModeSelector_SelectionChanged"
+                              AutomationProperties.Name="{local:Translate Text=&quot;Chart interaction mode&quot;}"
+                              ToolTip="{local:Translate Text=&quot;Drag to pan · Select points to measure · wheel to zoom · horizontal scroll / arrow keys to pan&quot;}">
+                        <ComboBoxItem Tag="Pan" Content="{local:Translate Text=Pan}" />
+                        <ComboBoxItem Tag="Select" Content="{local:Translate Text=&quot;Select points&quot;}" />
+                    </ComboBox>
+                    <Button Content="−" ToolTip="{local:Translate Text=&quot;Zoom out&quot;}" Click="ZoomOut_Click" />
+                    <Button Content="+" ToolTip="{local:Translate Text=&quot;Zoom in&quot;}" Click="ZoomIn_Click" />
+                    <Button x:Name="FollowButton" Content="{local:Translate Text=&quot;Follow live&quot;}" Click="FollowLive_Click" />
+                    <Button Content="{local:Translate Text=More…}" Click="OpenMenu_Click"
+                            AutomationProperties.Name="{local:Translate Text=&quot;Chart actions&quot;}">
+                        <Button.ContextMenu>
+                            <ContextMenu Background="{DynamicResource CardBrush}" Foreground="{DynamicResource TextBrush}">
+                                <MenuItem x:Name="EarlierMenuItem" Header="{local:Translate Text=&quot;← Earlier&quot;}" InputGestureText="←" Click="Earlier_Click" />
+                                <MenuItem x:Name="LaterMenuItem" Header="{local:Translate Text=&quot;Later →&quot;}" InputGestureText="→" Click="Later_Click" />
+                                <Separator />
+                                <MenuItem Header="{local:Translate Text=&quot;Fit today&quot;}" InputGestureText="Home" Click="ResetChart_Click" />
+                                <MenuItem Header="{local:Translate Text=&quot;Fit selection&quot;}" Click="FitSelection_Click" />
+                                <MenuItem Header="{local:Translate Text=&quot;Clear selection&quot;}" InputGestureText="Esc" Click="ClearSelection_Click" />
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
                 </WrapPanel>
                 <TextBlock x:Name="ChartRange" Style="{StaticResource SubtleText}" Margin="0,6,0,0" />
                 <local:PowerChart x:Name="Chart" Height="210" Margin="0,4,0,0" />
-                <TextBlock Text="Drag to pan · Select points to measure · wheel to zoom · horizontal scroll / arrow keys to pan" Style="{StaticResource SubtleText}" TextWrapping="Wrap" />
-                <WrapPanel Margin="0,8,0,0">
-                    <TextBlock Text="From" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <TextBox x:Name="SelectionStart" Width="85" Padding="6,4" Margin="0,0,12,0" ToolTip="Selection start: HH:mm:ss" AutomationProperties.Name="Selection start time" />
-                    <TextBlock Text="To" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <TextBox x:Name="SelectionEnd" Width="85" Padding="6,4" Margin="0,0,12,0" ToolTip="Selection end: HH:mm:ss" AutomationProperties.Name="Selection end time" />
-                    <Button Content="Calculate" Click="CalculateSelection_Click" />
-                </WrapPanel>
-                <TextBlock x:Name="SelectionSummary" Text="Choose Select points and drag, or enter two times to calculate a range."
-                           Style="{StaticResource SubtleText}" TextWrapping="Wrap" Margin="0,6,0,0" />
+                <TextBlock x:Name="SelectionSummary" Text="{local:Translate Text=&quot;No selection&quot;}"
+                           Style="{StaticResource SubtleText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                           ToolTip="{local:Translate Text=&quot;Range estimates use recorded power rates; missing readings and sleep gaps are excluded. Ledger totals also use capacity calibration.&quot;}" />
+                <Expander Header="{local:Translate Text=&quot;Selection analysis&quot;}" Foreground="{DynamicResource TextBrush}" Margin="0,8,0,0">
+                    <StackPanel Margin="0,6,0,0">
+                        <TextBlock Text="{local:Translate Text=&quot;Choose Select points and drag, or enter two times to calculate a range.&quot;}"
+                                   Style="{StaticResource SubtleText}" Margin="0,0,0,6" />
+                        <WrapPanel>
+                            <TextBlock Text="{local:Translate Text=&quot;From&quot;}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBox x:Name="SelectionStart" Width="85" Padding="6,4" Margin="0,0,12,0" ToolTip="{local:Translate Text=&quot;Selection start: HH:mm:ss&quot;}" AutomationProperties.Name="{local:Translate Text=&quot;Selection start time&quot;}" />
+                            <TextBlock Text="{local:Translate Text=&quot;To&quot;}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBox x:Name="SelectionEnd" Width="85" Padding="6,4" Margin="0,0,12,0" ToolTip="{local:Translate Text=&quot;Selection end: HH:mm:ss&quot;}" AutomationProperties.Name="{local:Translate Text=&quot;Selection end time&quot;}" />
+                            <Button Content="{local:Translate Text=&quot;Calculate&quot;}" Click="CalculateSelection_Click" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Expander>
             </StackPanel>
         </Border>
 
@@ -119,7 +138,7 @@
                 </Grid.RowDefinitions>
 
                 <Grid>
-                    <TextBlock Text="Today's ledger" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Text="{local:Translate Text=&quot;Today's ledger&quot;}" Style="{StaticResource SectionTitle}" />
                     <TextBlock Text="{Binding StatusText}"
                                HorizontalAlignment="Right"
                                VerticalAlignment="Center"
@@ -131,37 +150,41 @@
                           Margin="0,8,0,0"
                           ItemsSource="{Binding Sessions}">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="START" Binding="{Binding Start}" Width="90" />
-                        <DataGridTextColumn Header="END" Binding="{Binding End}" Width="90" />
-                        <DataGridTextColumn Header="STATE" Binding="{Binding State}" Width="*" />
-                        <DataGridTextColumn Header="DURATION" Binding="{Binding Duration}" Width="110" />
-                        <DataGridTextColumn Header="BATTERY" Binding="{Binding Battery}" Width="130" />
-                        <DataGridTextColumn Header="ENERGY" Binding="{Binding Energy}" Width="100" />
-                        <DataGridTextColumn Header="AVG W" Binding="{Binding Average}" Width="90" />
+                        <DataGridTextColumn Header="{local:Translate Text=&quot;START&quot;}" Binding="{Binding Start}" Width="90" />
+                        <DataGridTextColumn Header="{local:Translate Text=&quot;END&quot;}" Binding="{Binding End}" Width="90" />
+                        <DataGridTextColumn Header="{local:Translate Text=&quot;STATE&quot;}" Binding="{Binding State}" Width="*" />
+                        <DataGridTextColumn Header="{local:Translate Text=&quot;DURATION&quot;}" Binding="{Binding Duration}" Width="110" />
+                        <DataGridTextColumn Header="{local:Translate Text=&quot;BATTERY&quot;}" Binding="{Binding Battery}" Width="130" />
+                        <DataGridTextColumn Header="{local:Translate Text=&quot;ENERGY&quot;}" Binding="{Binding Energy}" Width="100" />
+                        <DataGridTextColumn Header="{local:Translate Text=&quot;AVG W&quot;}" Binding="{Binding Average}" Width="90" />
                     </DataGrid.Columns>
                 </DataGrid>
             </Grid>
         </Border>
 
-        <Grid Grid.Row="4" Margin="0,14,0,0">
-            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-            <StackPanel Orientation="Horizontal">
-                <Button Content="Export CSV" Click="ExportCsv_Click" />
-                <Button Content="Export report" Click="ExportReport_Click" />
-                <Button Content="Export JSON" Click="ExportJson_Click" />
-                <Button Content="Open data folder" Click="OpenData_Click" />
-            </StackPanel>
-
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="AutostartButton" Content="Start with Windows" Click="Autostart_Click" />
-                <Button Content="Hide to tray" Click="Hide_Click" />
-            </StackPanel>
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,9,0,0">
-                <TextBlock Text="Theme" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                <ComboBox x:Name="ThemeSelector" Width="126" SelectionChanged="ThemeSelector_SelectionChanged"
-                          AutomationProperties.Name="Color theme" ToolTip="System follows the Windows app appearance" />
-            </StackPanel>
-        </Grid>
+        <WrapPanel Grid.Row="4" Margin="0,14,0,0">
+            <Button Content="{local:Translate Text=Application}" Click="OpenMenu_Click">
+                <Button.ContextMenu>
+                    <ContextMenu Background="{DynamicResource CardBrush}" Foreground="{DynamicResource TextBrush}">
+                        <MenuItem Header="{local:Translate Text=&quot;Export CSV&quot;}" Click="ExportCsv_Click" />
+                        <MenuItem Header="{local:Translate Text=&quot;Export report&quot;}" Click="ExportReport_Click" />
+                        <MenuItem Header="{local:Translate Text=&quot;Export JSON&quot;}" Click="ExportJson_Click" />
+                        <Separator />
+                        <MenuItem Header="{local:Translate Text=&quot;Open data folder&quot;}" Click="OpenData_Click" />
+                        <MenuItem x:Name="AutostartMenuItem" Header="{local:Translate Text=&quot;Start with Windows&quot;}" IsCheckable="True" Click="Autostart_Click" />
+                        <MenuItem Header="{local:Translate Text=&quot;Hide to tray&quot;}" Click="Hide_Click" />
+                        <Separator />
+                        <MenuItem Header="{local:Translate Text=Exit}" Click="Exit_Click" />
+                    </ContextMenu>
+                </Button.ContextMenu>
+            </Button>
+            <TextBlock Text="{local:Translate Text=&quot;Theme&quot;}" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,8,0" />
+            <ComboBox x:Name="ThemeSelector" Width="150" DisplayMemberPath="Label" SelectedValuePath="Value" SelectionChanged="ThemeSelector_SelectionChanged"
+                      VerticalAlignment="Center" AutomationProperties.Name="{local:Translate Text=&quot;Color theme&quot;}" ToolTip="{local:Translate Text=&quot;System follows the Windows app appearance&quot;}" />
+            <TextBlock Text="{local:Translate Text=Language}" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="20,0,8,0" />
+            <ComboBox x:Name="LanguageSelector" Width="160" DisplayMemberPath="Label" SelectedValuePath="Value" VerticalAlignment="Center"
+                      SelectionChanged="LanguageSelector_SelectionChanged" AutomationProperties.Name="{local:Translate Text=Language}" />
+        </WrapPanel>
     </Grid>
     </ScrollViewer>
 </Window>

@@ -374,15 +374,15 @@ public sealed class PowerChart : FrameworkElement
         context.Pop();
         if (_hover is { } hovered)
         {
-            var power = hovered.Watts is { } watts ? $"{watts:+0.00;-0.00;0.00} W" : "power unavailable";
-            var percent = hovered.BatteryPercent is { } battery ? $"{battery}%" : "battery unavailable";
+            var power = hovered.Watts is { } watts ? $"{watts:+0.00;-0.00;0.00} W" : AppText.Get("power unavailable");
+            var percent = hovered.BatteryPercent is { } battery ? $"{battery}%" : AppText.Get("battery unavailable");
             var text = _hoverText ??= Text($"{hovered.Timestamp.ToLocalTime():MM-dd HH:mm:ss} · {power} · {percent}", 11);
             var x = Math.Max(layout.PlotLeft, Math.Min(XAt(hovered.Timestamp, layout) + 10, ActualWidth - text.Width - 12));
             context.DrawRoundedRectangle(_hoverBackBrush!, null,
                 new Rect(x - 5, layout.PlotTop + 4, text.Width + 10, text.Height + 8), 4, 4);
             context.DrawText(text, new Point(x, layout.PlotTop + 8));
         }
-        if (layout.ActualStart is null) context.DrawText(_emptyText ??= Text("No samples in this range", 12), new Point(layout.PlotLeft + 10, layout.PlotTop + 12));
+        if (layout.ActualStart is null) context.DrawText(_emptyText ??= Text(AppText.Get("No samples in this range"), 12), new Point(layout.PlotLeft + 10, layout.PlotTop + 12));
     }
 
     private PowerChartLayout EnsureLayout()

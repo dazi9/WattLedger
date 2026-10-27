@@ -1,3 +1,4 @@
+using WattLedger.Desktop;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -19,6 +20,7 @@ public sealed partial class App : Application
 
     public override void Initialize()
     {
+        AppText.Initialize();
         AvaloniaXamlLoader.Load(this);
         InitializeTheme();
     }
@@ -84,7 +86,7 @@ public sealed partial class App : Application
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
         catch (Exception ex)
         {
-            _window?.SetStartupError($"Could not start sampling: {ex.Message}");
+            _window?.SetStartupError(ex.Message);
         }
 
         if (cancellationToken.IsCancellationRequested) return;
@@ -95,7 +97,7 @@ public sealed partial class App : Application
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            _window?.SetPlatformStatus($"Suspend/resume notifications unavailable; sleep gaps will be inferred. {ex.Message}");
+            _window?.SetPlatformError("Suspend/resume notifications unavailable; sleep gaps will be inferred. {0}", ex.Message);
         }
     }
 

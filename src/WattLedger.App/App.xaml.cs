@@ -5,6 +5,8 @@ using Hardcodet.Wpf.TaskbarNotification;
 using Microsoft.Win32;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
+using WattLedger.Desktop;
+using static WattLedger.Desktop.AppText;
 
 namespace WattLedger.App;
 
@@ -17,10 +19,13 @@ public partial class App : Application
     private TaskbarIcon? _tray;
     private Task<bool>? _startupTask;
     private bool _exiting;
+    private string? _startupFailureMessage;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        AppText.Initialize();
+        AppText.LanguageChanged += OnLanguageChanged;
         InitializeTheme();
 
         _mutex = new Mutex(true, @"Local\WattLedger.SingleInstance", out var createdNew);
@@ -28,7 +33,7 @@ public partial class App : Application
         if (!createdNew)
         {
             MessageBox.Show(
-                "WattLedger is already running. Look for it in the notification area.",
+                Get("WattLedger is already running. Look for it in the notification area."),
                 "WattLedger",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -81,13 +86,13 @@ public partial class App : Application
     private void ReportStartupFailure(Exception error)
     {
         if (_exiting) return;
-        if (_tray is not null) _tray.ToolTipText = "Not recording · WattLedger";
+        _startupFailureMessage = error.Message;
+        if (_tray is not null) _tray.ToolTipText = Get("Not recording · WattLedger");
         _window?.SetStartupFailure(error.Message);
         // Use a dialog even when hidden: Windows can suppress tray balloons.
         MessageBox.Show(
-            $"WattLedger is not recording.\n\n{error.Message}\n\n" +
-            "If another sampler is using this database, stop it and restart WattLedger.",
-            "WattLedger could not start",
+            Format("WattLedger is not recording.\n\n{0}\n\nIf another sampler is using this database, stop it and restart WattLedger.", error.Message),
+            Get("WattLedger could not start"),
             MessageBoxButton.OK,
             MessageBoxImage.Error);
     }
@@ -126,42 +131,53 @@ public partial class App : Application
 
         tray.TrayMouseDoubleClick += (_, _) => ShowMainWindow();
 
-        var menu = new ContextMenu();
-        var openItem = new MenuItem { Header = "Open WattLedger" };
-        openItem.Click += (_, _) => ShowMainWindow();
-        var hideItem = new MenuItem { Header = "Hide window" };
-        hideItem.Click += (_, _) => _window?.HideToTray();
-        var exitItem = new MenuItem { Header = "Exit" };
-        exitItem.Click += (_, _) => ExitApplication();
+        tray.ContextMenu = CreateTrayMenu();
+        return tray;
+    }
 
+    private ContextMenu CreateTrayMenu()
+    {
+        var menu = new ContextMenu();
+        var openItem = new MenuItem { Header = Get("Open WattLedger") };
+        openItem.Click += (_, _) => ShowMainWindow();
+        var hideItem = new MenuItem { Header = Get("Hide window") };
+        hideItem.Click += (_, _) => _window?.HideToTray();
+        var exitItem = new MenuItem { Header = Get("Exit") };
+        exitItem.Click += (_, _) => ExitApplication();
         menu.Items.Add(openItem);
         menu.Items.Add(hideItem);
         menu.Items.Add(new Separator());
         menu.Items.Add(exitItem);
-        tray.ContextMenu = menu;
-
-        return tray;
+        return menu;
     }
 
-    private void OnStatusUpdated(object? sender, LedgerStatus status)
+    private void OnLanguageChanged(object? sender, EventArgs args)
     {
-        _tray?.Dispatcher.BeginInvoke(() =>
-        {
-            if (_tray is null)
-            {
-                return;
-            }
-
-            var battery = status.Battery;
-            _tray.ToolTipText = battery switch
-            {
-                { IsDischarging: true, DischargeWatts: { } watts } => $"+{watts:0.0} W · {battery.Percent}% · WattLedger",
-                { IsCharging: true, ChargeWatts: { } watts } => $"-{watts:0.0} W · {battery.Percent}% · WattLedger",
-                { IsAcOnline: true } => $"AC · {battery.Percent}% · WattLedger",
-                _ => $"Power unavailable · {battery.Percent}% · WattLedger"
-            };
-        });
+        if (_exiting || Dispatcher.HasShutdownStarted) return;
+        if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(() => OnLanguageChanged(sender, args)); return; }
+        if (_tray is null) return;
+        _tray.ContextMenu = CreateTrayMenu();
+        UpdateTrayTooltip(_service?.Latest);
     }
+
+    private void UpdateTrayTooltip(LedgerStatus? status)
+    {
+        if (_tray is null) return;
+        if (_startupFailureMessage is not null) { _tray.ToolTipText = Get("Not recording · WattLedger"); return; }
+        if (status is null) { _tray.ToolTipText = "WattLedger"; return; }
+        var battery = status.Battery;
+        var percent = battery.Percent is { } p ? $"{p}%" : "—";
+        _tray.ToolTipText = battery switch
+        {
+            { IsDischarging: true, DischargeWatts: { } watts } => $"+{watts:0.0} W · {percent} · WattLedger",
+            { IsCharging: true, ChargeWatts: { } watts } => $"-{watts:0.0} W · {percent} · WattLedger",
+            { IsAcOnline: true } => Format("AC · {0} · WattLedger", percent),
+            _ => Format("Power unavailable · {0} · WattLedger", percent)
+        };
+    }
+
+    private void OnStatusUpdated(object? sender, LedgerStatus status) =>
+        _tray?.Dispatcher.BeginInvoke(() => UpdateTrayTooltip(status));
 
     private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
     {
@@ -193,6 +209,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _exiting = true;
+        AppText.LanguageChanged -= OnLanguageChanged;
         ShutdownTheme();
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         if (_service is not null) _service.StatusUpdated -= OnStatusUpdated;
