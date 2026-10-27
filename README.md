@@ -2,11 +2,11 @@
 
 **A local-first energy journal for Windows and Linux laptops.**
 
-English · [简体中文](README.zh-CN.md)
+**English** · [简体中文](README.zh-CN.md)
 
 WattLedger records battery power, energy use, charging and sleep gaps, and battery health in a local SQLite database. It combines a desktop dashboard with a scriptable CLI. Basic battery readings need no kernel driver or administrator rights; the application has no network service, accounts, cloud sync or telemetry.
 
-The current source version is **0.2.1**. Check [Releases](https://github.com/dazi9/WattLedger/releases) and the [changelog](CHANGELOG.md) for published versions: features in this branch may be newer than a release asset. The application UI currently uses English; Simplified Chinese UI support is planned for the next iteration.
+The current source version is **0.2.1**. Check [Releases](https://github.com/dazi9/WattLedger/releases) and the [changelog](CHANGELOG.md) for published versions: features in this branch may be newer than a release asset. Both desktop applications support English and Simplified Chinese, with a saved System language option.
 
 ![Windows dashboard with synthetic demonstration data](docs/screenshot.png)
 
