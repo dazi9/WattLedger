@@ -6,7 +6,7 @@ namespace WattLedger.Linux;
 internal sealed class TrayHostDetector : IAsyncDisposable
 {
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
-    private Connection? _connection;
+    private DBusConnection? _connection;
     private IDisposable? _subscription;
     private bool _disposed;
     private int _availabilityState = -1;
@@ -26,13 +26,13 @@ internal sealed class TrayHostDetector : IAsyncDisposable
         {
             if (_disposed) throw new ObjectDisposedException(nameof(TrayHostDetector));
             if (_connection is not null) return;
-            if (string.IsNullOrWhiteSpace(Address.Session))
+            if (string.IsNullOrWhiteSpace(DBusAddress.Session))
             {
                 SetAvailability(false);
                 return;
             }
 
-            var connection = new Connection(Address.Session);
+            var connection = new DBusConnection(DBusAddress.Session);
             _connection = connection;
             await connection.ConnectAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
             var rule = new MatchRule
@@ -52,14 +52,15 @@ internal sealed class TrayHostDetector : IAsyncDisposable
                     var reader = message.GetBodyReader();
                     return [reader.ReadString(), reader.ReadString(), reader.ReadString()];
                 },
-                (error, values, _, _) =>
+                notification =>
                 {
-                    if (error is not null)
+                    if (!notification.HasValue)
                     {
                         NotifyConnectionLost();
                         return;
                     }
 
+                    var values = notification.Value;
                     Interlocked.Increment(ref signalRevision);
                     if (values.Length == 3 && TrayHostState.ApplyOwnerChanged(values[0], values[2]) is { } available)
                     {
@@ -95,7 +96,7 @@ internal sealed class TrayHostDetector : IAsyncDisposable
 
     internal void NotifyConnectionLost() => SetAvailability(TrayHostState.ConnectionLost());
 
-    private static async Task<bool> HasWatcherAsync(Connection connection, CancellationToken cancellationToken)
+    private static async Task<bool> HasWatcherAsync(DBusConnection connection, CancellationToken cancellationToken)
     {
         MessageBuffer message;
         using (var writer = connection.GetMessageWriter())

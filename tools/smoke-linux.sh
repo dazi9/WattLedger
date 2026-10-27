@@ -41,6 +41,7 @@ timeout --signal=TERM --kill-after=2s 15s \
     XDG_STATE_HOME="$smoke_dir/state" \
     XDG_RUNTIME_DIR="$smoke_dir/runtime" \
     DOTNET_BUNDLE_EXTRACT_BASE_DIR="$smoke_dir/bundles" \
+    WATTLEDGER_BACKEND=x11 \
     bash -c '
       set -Eeuo pipefail
       app_pid=

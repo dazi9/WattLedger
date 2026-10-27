@@ -29,5 +29,6 @@ public sealed class TestAppBuilder : Application
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<TestAppBuilder>()
             .UseSkia()
+            .UseHarfBuzz()
             .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
 }

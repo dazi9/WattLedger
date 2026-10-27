@@ -8,7 +8,7 @@ internal sealed class LogindMonitor : IAsyncDisposable
     private readonly WattLedgerService _service;
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
-    private Connection? _connection;
+    private DBusConnection? _connection;
     private IDisposable? _subscription;
     private bool _suspended;
     private bool _disposed;
@@ -25,12 +25,12 @@ internal sealed class LogindMonitor : IAsyncDisposable
         {
             linked.Token.ThrowIfCancellationRequested();
             if (_disposed) throw new ObjectDisposedException(nameof(LogindMonitor));
-            if (string.IsNullOrWhiteSpace(Address.System))
+            if (string.IsNullOrWhiteSpace(DBusAddress.System))
             {
                 throw new InvalidOperationException("The system D-Bus address is not configured.");
             }
 
-            var connection = new Connection(Address.System);
+            var connection = new DBusConnection(DBusAddress.System);
             _connection = connection;
             await connection.ConnectAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3), linked.Token).ConfigureAwait(false);
             var rule = new MatchRule
@@ -60,9 +60,9 @@ internal sealed class LogindMonitor : IAsyncDisposable
         finally { _lifecycle.Release(); }
     }
 
-    private void HandleSignal(Exception? error, bool prepareForSleep, object? state, object? userData)
+    private void HandleSignal(Notification<bool> notification)
     {
-        if (error is not null)
+        if (!notification.HasValue)
         {
             if (_suspended)
             {
@@ -78,6 +78,7 @@ internal sealed class LogindMonitor : IAsyncDisposable
             return;
         }
 
+        var prepareForSleep = notification.Value;
         try
         {
             if (prepareForSleep && !_suspended)

@@ -53,8 +53,8 @@ internal sealed class MainWindow : Window
     private readonly TextBlock _chartNavigationHint = DetailText("Pan mode: drag left/right to explore today's data.");
     private readonly TextBlock _chartRange = DetailText("Waiting for samples");
     private readonly TextBlock _selectionSummary = DetailText("Choose Select and drag across the chart, or enter two times to calculate a range.");
-    private readonly TextBox _selectionStart = new() { Watermark = "HH:mm:ss", Width = 98, FontSize = 11 };
-    private readonly TextBox _selectionEnd = new() { Watermark = "HH:mm:ss", Width = 98, FontSize = 11 };
+    private readonly TextBox _selectionStart = new() { PlaceholderText = "HH:mm:ss", Width = 98, FontSize = 11 };
+    private readonly TextBox _selectionEnd = new() { PlaceholderText = "HH:mm:ss", Width = 98, FontSize = 11 };
     private readonly Button _startupButton;
     private readonly TrayIcon _trayIcon;
     private readonly DispatcherTimer _reportRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(350) };
