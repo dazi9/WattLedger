@@ -123,6 +123,7 @@ public sealed class LocalizationTests
             AppText.SetLanguage(original);
             AppText.Initialize();
             if (window is not null) await window.DisposeAsync();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(directory, true);
         }
     }

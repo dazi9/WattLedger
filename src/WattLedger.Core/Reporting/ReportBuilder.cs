@@ -205,7 +205,15 @@ public static class ReportBuilder
             _ => value.ToString() ?? ""
         };
 
-        return text.Contains('"') || text.Contains(',') || text.Contains('\n')
+        // Spreadsheet applications treat a leading =, +, -, @ or tab as a formula. Free-text
+        // columns (process and device names) are prefixed with an apostrophe so exported data
+        // stays inert; numeric columns are unaffected.
+        if (value is string && text.Length > 0 && "=+-@\t".Contains(text[0]))
+        {
+            text = "'" + text;
+        }
+
+        return text.Contains('"') || text.Contains(',') || text.Contains('\n') || text.Contains('\r')
             ? $"\"{text.Replace("\"", "\"\"")}\""
             : text;
     }
