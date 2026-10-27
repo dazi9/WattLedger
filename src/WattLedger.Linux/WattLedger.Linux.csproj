@@ -9,15 +9,16 @@
 
   <ItemGroup>
     <ProjectReference Include="../WattLedger.Core/WattLedger.Core.csproj" />
-    <PackageReference Include="Avalonia" Version="12.1.4" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
-    <PackageReference Include="Avalonia.Wayland" Version="12.1.4" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageReference Include="Avalonia" Version="[12.1.4]" />
+    <PackageReference Include="Avalonia.Desktop" Version="[12.1.4]" />
+    <ProjectReference Include="../../third_party/Avalonia.Wayland/Avalonia.Wayland.csproj" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="[12.1.4]" />
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />
   </ItemGroup>
 
   <ItemGroup>
     <AvaloniaResource Include="Assets/**/*.svg" />
+    <Compile Include="../WattLedger.Desktop/ChartGestureScale.cs" Link="Shared/ChartGestureScale.cs" />
     <Compile Include="../WattLedger.Desktop/ChartSeries.cs" Link="Shared/ChartSeries.cs" />
     <Compile Include="../WattLedger.Desktop/PowerChartLayout.cs" Link="Shared/PowerChartLayout.cs" />
     <Compile Include="../WattLedger.Desktop/DashboardDataLoader.cs" Link="Shared/DashboardDataLoader.cs" />

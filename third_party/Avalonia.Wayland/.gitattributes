@@ -1,0 +1,5 @@
+upstream/** text eol=lf -whitespace
+*.py text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.snk binary

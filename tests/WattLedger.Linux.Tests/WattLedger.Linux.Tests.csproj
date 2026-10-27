@@ -20,6 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="../../third_party/Avalonia.Wayland/upstream/src/Avalonia.Wayland/Server/Transient/WaylandPointerPinchState.cs" Link="WaylandPointerPinchState.cs" />
     <Using Include="Xunit" />
   </ItemGroup>
 </Project>

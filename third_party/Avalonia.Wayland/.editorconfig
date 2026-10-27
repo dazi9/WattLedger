@@ -1,0 +1,2 @@
+[upstream/**/*.cs]
+generated_code = true

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>WattLedger.Avalonia.Wayland.Generators</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>enable</Nullable>
+    <LangVersion>14.0</LangVersion>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CS8669</NoWarn>
+    <AvaloniaSourceRoot>$(MSBuildThisFileDirectory)../upstream</AvaloniaSourceRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Use the installed .NET 10 compiler, without a second Roslyn toolchain. -->
+    <Reference Include="Microsoft.CodeAnalysis" HintPath="$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.dll" Private="false" />
+    <Reference Include="Microsoft.CodeAnalysis.CSharp" HintPath="$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll" Private="false" />
+    <Compile Include="$(AvaloniaSourceRoot)/src/tools/DevGenerators/Helpers.cs" />
+    <Compile Include="$(AvaloniaSourceRoot)/src/tools/DevGenerators/CrossThreadProxyGenerator.cs" />
+    <Compile Include="$(AvaloniaSourceRoot)/src/tools/DevGenerators/DefinitelyNotARecordGenerator.cs" />
+  </ItemGroup>
+</Project>

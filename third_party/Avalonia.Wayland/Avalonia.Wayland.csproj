@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Avalonia.Wayland</AssemblyName>
+    <Version>12.1.4</Version>
+    <Authors>Avalonia Team; WattLedger contributors</Authors>
+    <Copyright>Copyright 2013-2026 The AvaloniaUI Project</Copyright>
+    <AssemblyVersion>12.1.4.0</AssemblyVersion>
+    <FileVersion>12.1.4.0</FileVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>enable</Nullable>
+    <LangVersion>14.0</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableRuntimeMarshalling>true</EnableRuntimeMarshalling>
+    <SignAssembly>true</SignAssembly>
+    <PublicSign>true</PublicSign>
+    <AssemblyOriginatorKeyFile>avalonia-public.snk</AssemblyOriginatorKeyFile>
+    <Deterministic>true</Deterministic>
+    <IsPackable>false</IsPackable>
+    <AvaloniaSourceRoot>$(MSBuildThisFileDirectory)upstream</AvaloniaSourceRoot>
+    <PathMap>$(MSBuildProjectDirectory)=/_/wayland</PathMap>
+    <!-- The verbatim upstream files are marked generated to exclude formatting. -->
+    <NoWarn>$(NoWarn);CS0649;CS8669</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Update="LICENSE-Avalonia.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="Avalonia.Wayland.LICENSE.md" />
+    <!-- Official reference DLLs intentionally remove platform implementer APIs.
+         Compile against the matching, signed implementation DLLs instead. -->
+    <PackageReference Include="Avalonia" Version="[12.1.4]" ExcludeAssets="compile" GeneratePathProperty="true" />
+    <PackageReference Include="Avalonia.FreeDesktop" Version="[12.1.4]" ExcludeAssets="compile" GeneratePathProperty="true" />
+    <PackageReference Include="NWayland" Version="[0.11.0]" />
+    <Reference Include="$(PkgAvalonia)/lib/net10.0/*.dll" />
+    <Reference Include="$(PkgAvalonia_FreeDesktop)/lib/net10.0/*.dll" />
+    <ProjectReference Include="generator/Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <Compile Include="$(AvaloniaSourceRoot)/src/Avalonia.Wayland/**/*.cs" />
+    <Compile Include="$(AvaloniaSourceRoot)/src/Shared/RawEventGrouping.cs" />
+    <Compile Include="$(AvaloniaSourceRoot)/src/Avalonia.X11/X11IconLoader.cs" />
+    <Compile Include="$(AvaloniaSourceRoot)/src/Avalonia.X11/Selections/UriListHelper.cs" />
+    <Compile Include="$(AvaloniaSourceRoot)/src/Avalonia.X11/Interop/Glib.cs" />
+    <Compile Include="$(AvaloniaSourceRoot)/src/Avalonia.X11/Dispatching/GlibDispatcherImplBase.cs" />
+  </ItemGroup>
+</Project>

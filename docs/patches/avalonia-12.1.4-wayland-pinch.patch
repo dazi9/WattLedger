@@ -1,0 +1,252 @@
+--- a/src/Avalonia.Wayland/Server/Persistent/IWSurfaceEventSink.cs
++++ b/src/Avalonia.Wayland/Server/Persistent/IWSurfaceEventSink.cs
+@@ -24,6 +24,7 @@
+     void OnPointerMotion(ulong timestamp, Point position, RawInputModifiers modifiers);
+     void OnPointerButton(ulong timestamp, uint serial, RawPointerEventType type, RawInputModifiers modifiers, Point position, object? platformCookie);
+     void OnPointerAxis(ulong timestamp, Vector delta, RawInputModifiers modifiers, Point position);
++    void OnPointerMagnify(ulong timestamp, double magnification, RawInputModifiers modifiers, Point position);
+ 
+     void OnTouchDown(ulong timestamp, int touchId, Point position, object? platformCookie);
+     void OnTouchMove(ulong timestamp, int touchId, Point position);
+--- a/src/Avalonia.Wayland/Server/Transient/WaylandGlobals.cs
++++ b/src/Avalonia.Wayland/Server/Transient/WaylandGlobals.cs
+@@ -8,6 +8,7 @@
+ using NWayland.Interop;
+ using NWayland.Protocols.FractionalScaleV1;
+ using NWayland.Protocols.LinuxDmabufV1;
++using NWayland.Protocols.PointerGesturesUnstableV1;
+ using NWayland.Protocols.TextInputUnstableV3;
+ using NWayland.Protocols.Viewporter;
+ using NWayland.Protocols.Wayland;
+@@ -29,6 +30,7 @@
+     public WlCompositor WlCompositor { get; }
+     public XdgWmBase XdgWmBase { get; }
+     public WlDataDeviceManager? DataDeviceManager { get; }
++    public ZwpPointerGesturesV1? PointerGestures { get; }
+     public ZwpLinuxDmabufV1? LinuxDmabuf { get; }
+     public WpFractionalScaleManagerV1? FractionalScaleManager { get; }
+     public WpViewporter? Viewporter { get; }
+@@ -142,6 +144,7 @@
+         XdgWmBase = BindRequired<XdgWmBase>(3, 4, new XdgWmBaseListener());
+         CursorManager = new WaylandCursorManager(connection.Display, WlShm, WlCompositor);
+         DataDeviceManager = Bind<WlDataDeviceManager>(3, 3, null);
++        PointerGestures = Bind<ZwpPointerGesturesV1>(1, 3, null);
+         LinuxDmabuf = Bind<ZwpLinuxDmabufV1>(4, 4, null);
+         FractionalScaleManager = Bind<WpFractionalScaleManagerV1>(1, 1, null);
+         Viewporter = Bind<WpViewporter>(1, 1, null);
+@@ -194,6 +197,10 @@
+     public void Dispose()
+     {
+         InputDispatcher.Dispose();
++        if (PointerGestures is { Version: >= 2 })
++            PointerGestures.Release();
++        else
++            PointerGestures?.Dispose();
+         Worker.PlatformGraphics.Reset();
+     }
+ }
+--- a/src/Avalonia.Wayland/Server/Transient/WaylandInputDispatcher.cs
++++ b/src/Avalonia.Wayland/Server/Transient/WaylandInputDispatcher.cs
+@@ -8,6 +8,7 @@
+ using Avalonia.Wayland.Server.Persistent;
+ using NWayland;
+ using NWayland.Protocols.Wayland;
++using NWayland.Protocols.PointerGesturesUnstableV1;
+ 
+ namespace Avalonia.Wayland.Server.Transient;
+ 
+@@ -97,6 +98,7 @@
+         foreach (var (globalName, seat) in _seats)
+         {
+             seat.EnsureDataDevice();
++            seat.EnsurePointerGestures();
+             TextInputV3?.OnSeatAdded(globalName, seat.WlSeat);
+         }
+     }
+@@ -193,6 +195,8 @@
+                 _dispatcher._globals.Connection.Display, _dispatcher._globals.Worker, () => KeyboardModifiers);
+             deviceListener.SetWrapper(DataDevice);
+         }
++
++        internal void EnsurePointerGestures() => _pointerHandler?.EnsurePinchGesture();
+ 
+         private void OnCapabilities(WlSeat.CapabilityEnum capabilities)
+         {
+@@ -269,6 +273,11 @@
+         private readonly WaylandInputDispatcher _dispatcher;
+         private readonly Seat _seat;
+         private readonly WlPointer _pointer;
++        private ZwpPointerGesturePinchV1? _pinchGesture;
++        private readonly WaylandPointerPinchState _pinchState = new();
++        private WSurfaceEventSinkProxy? _pinchSink;
++        private WlSurface? _pinchSurface;
++        private Point _pinchPosition;
+ 
+         // Persistent pointer state (survives across frames)
+         private WSurfaceEventSinkProxy? _focusedSink;
+@@ -311,6 +320,57 @@
+             _dispatcher = dispatcher;
+             _seat = seat;
+             _pointer = seat.WlSeat.GetPointer(new Listener(this));
++            EnsurePinchGesture();
++        }
++
++        internal void EnsurePinchGesture()
++        {
++            if (_pinchGesture == null && _dispatcher._globals.PointerGestures is { } gestures)
++                _pinchGesture = gestures.GetPinchGesture(_pointer, new PinchListener(this));
++        }
++
++        private void ResetPinch()
++        {
++            _pinchState.End();
++            _pinchSink = null;
++            _pinchSurface = null;
++        }
++
++        // Pointer gestures have their own begin/update/end framing; they do not wait
++        // for wl_pointer.frame. Keep the begin surface and cursor anchor for the full
++        // sequence so another window cannot receive the remainder of a gesture.
++        class PinchListener(PointerHandler handler) : ZwpPointerGesturePinchV1.Listener
++        {
++            protected override void Begin(ZwpPointerGesturePinchV1 eventSender, uint serial,
++                uint time, WlSurface? surface, uint fingers)
++            {
++                handler.ResetPinch();
++                if (fingers < 2 || surface is null || surface.IsDisposed ||
++                    FindSurfaceForWlSurface(surface) is not { } target)
++                    return;
++                handler._pinchSurface = surface;
++                handler._pinchSink = target.EventSink;
++                handler._pinchPosition = handler._pointerPosition;
++                handler._pinchState.Begin();
++            }
++
++            protected override void Update(ZwpPointerGesturePinchV1 eventSender, uint time,
++                WlFixed dx, WlFixed dy, WlFixed scale, WlFixed rotation)
++            {
++                if (handler._pinchSurface is not { IsDisposed: false })
++                {
++                    handler.ResetPinch();
++                    return;
++                }
++                // Wayland scale is cumulative from begin. Avalonia magnification
++                // is a per-packet fractional increase (the same contract as macOS).
++                if (handler._pinchState.TryUpdate((double)scale, out var magnification))
++                    handler._pinchSink?.OnPointerMagnify(time, magnification,
++                        handler._modifiers | handler._seat.KeyboardModifiers, handler._pinchPosition);
++            }
++
++            protected override void End(ZwpPointerGesturePinchV1 eventSender, uint serial,
++                uint time, int cancelled) => handler.ResetPinch();
+         }
+ 
+         // Shared, stateless fallback used when a surface hasn't requested a specific cursor.
+@@ -366,6 +426,9 @@
+ 
+         public void Dispose()
+         {
++            ResetPinch();
++            _pinchGesture?.Destroy();
++            _pinchGesture = null;
+             _pointer.Release();
+         }
+ 
+@@ -389,6 +452,8 @@
+ 
+             protected override void Leave(WlPointer eventSender, uint serial, WlSurface? surface)
+             {
++                if (ReferenceEquals(handler._pinchSurface, surface))
++                    handler.ResetPinch();
+                 handler._frameActions.Add(() =>
+                 {
+                     var leaveSink = handler._focusedSink;
+@@ -446,7 +511,7 @@
+                     // if any v120 event fired this frame; otherwise scale the raw axis.
+                     var deltaX = handler._frameV120SeenX ? handler._frameV120X : handler._frameAxisRawX / AxisUnitsPerDetent;
+                     var deltaY = handler._frameV120SeenY ? handler._frameV120Y : handler._frameAxisRawY / AxisUnitsPerDetent;
+-                    if (deltaX != 0 || deltaY != 0)
++                    if (!handler._pinchState.IsActive && (deltaX != 0 || deltaY != 0))
+                     {
+                         // Wayland: positive = scroll down/right. Avalonia: positive Y = scroll up.
+                         var delta = new Vector(-deltaX, -deltaY);
+@@ -458,6 +523,8 @@
+ 
+             protected override void Axis(WlPointer eventSender, uint time, WlPointer.AxisEnum axis, WlFixed value)
+             {
++                if (handler._pinchState.IsActive)
++                    return;
+                 handler._frameAxisTimestamp = time;
+ 
+                 if (axis == WlPointer.AxisEnum.VerticalScroll)
+@@ -478,6 +545,8 @@
+ 
+             protected override void AxisDiscrete(WlPointer eventSender, WlPointer.AxisEnum axis, int discrete)
+             {
++                if (handler._pinchState.IsActive)
++                    return;
+                 // wl_pointer v5–v7 discrete-step indicator. 1 == one wheel detent. Deprecated
+                 // and not sent in v8+ (replaced by axis_value120). Folded into the v120
+                 // accumulator (since their semantics align: 1 detent each).
+@@ -497,6 +566,8 @@
+ 
+             protected override void AxisValue120(WlPointer eventSender, WlPointer.AxisEnum axis, int value120)
+             {
++                if (handler._pinchState.IsActive)
++                    return;
+                 // Higher-resolution scroll: 120 units = one notch. Multiple value120 events
+                 // for the same axis in a frame must be summed (per spec example: a single
+                 // hardware event can produce -240 = two negative notches).
+--- /dev/null
++++ b/src/Avalonia.Wayland/Server/Transient/WaylandPointerPinchState.cs
+@@ -0,0 +1,32 @@
++using System;
++
++namespace Avalonia.Wayland.Server.Transient;
++
++// Converts the protocol's cumulative scale into Avalonia's incremental magnify
++// contract. Keeping this independent of the proxy makes sequence edge cases testable.
++internal sealed class WaylandPointerPinchState
++{
++    private double _scale;
++    public bool IsActive { get; private set; }
++
++    public void Begin()
++    {
++        _scale = 1;
++        IsActive = true;
++    }
++
++    public void End() => IsActive = false;
++
++    public bool TryUpdate(double scale, out double magnification)
++    {
++        magnification = 0;
++        if (!IsActive || !double.IsFinite(scale) || scale <= 0)
++            return false;
++        var relativeScale = scale / _scale;
++        if (!double.IsFinite(relativeScale) || relativeScale <= 0)
++            return false;
++        _scale = scale;
++        magnification = relativeScale - 1;
++        return magnification != 0;
++    }
++}
+--- a/src/Avalonia.Wayland/WindowImplBase.Pointer.cs
++++ b/src/Avalonia.Wayland/WindowImplBase.Pointer.cs
+@@ -50,6 +50,15 @@
+                 position, delta, modifiers));
+         }
+ 
++        void IWSurfaceEventSink.OnPointerMagnify(ulong timestamp, double magnification,
++            RawInputModifiers modifiers, Point position)
++        {
++            if (InputRoot is null)
++                return;
++            ScheduleInput(new RawPointerGestureEventArgs(Mouse, timestamp, InputRoot,
++                RawPointerEventType.Magnify, position, new Vector(magnification, magnification), modifiers));
++        }
++
+         void IWSurfaceEventSink.OnTouchDown(ulong timestamp, int touchId, Point position, object? platformCookie)
+         {
+             if (InputRoot is null)
