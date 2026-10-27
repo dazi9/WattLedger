@@ -4,7 +4,7 @@ Both desktop apps offer **System**, **Light**, and **Dark** in the footer's Them
 
 System follows Avalonia's effective desktop appearance on Linux and the Windows `AppsUseLightTheme` preference on Windows. The Windows app observes system preference changes while running. Linux follows the appearance supplied by the desktop/platform integration; if that integration does not expose a preference, Avalonia's default applies. Choosing Light or Dark overrides the system setting.
 
-Preferences are saved atomically to:
+Preferences are saved to:
 
 - Linux: `$XDG_CONFIG_HOME/wattledger/preferences.json`, falling back to `~/.config/wattledger/preferences.json`.
 - Windows: `%LocalAppData%/WattLedger/preferences.json`.

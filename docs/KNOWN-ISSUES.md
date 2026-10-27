@@ -1,6 +1,6 @@
 # Non-blocking follow-ups
 
-Updated 2026-10-25. These items are deferred from the sampler and interactive-chart fixes. Power-state classification, writer-lease failures, missing-data handling, and shutdown safety are covered by the fixes and regression tests.
+Updated 2026-10-27. These items are deferred from the sampler and interactive-chart fixes. Power-state classification, writer-lease failures, missing-data handling, and shutdown safety are covered by the fixes and regression tests.
 
 | Item | Effect and current workaround |
 |---|---|
@@ -10,7 +10,8 @@ Updated 2026-10-25. These items are deferred from the sampler and interactive-ch
 | Sparse-data hover | Hover inspects the nearest original point in the visible range, which can be some distance from the pointer around a sampling gap. Read the timestamp in the tooltip; gaps are excluded from integration. |
 | Live cards after a window-manager restore | Restoring a minimized window refreshes the chart/report immediately, but live cards can wait for the next sample (normally up to 30 seconds on AC). Opening through the tray applies the latest live reading immediately. Sampling and stored history continue throughout. |
 | History navigation | The interactive Linux chart currently covers today. Previous-day selection, multi-day comparison, and selection export are future UI work; the CLI and existing full-day exports remain available. |
-| Chart navigation on physical touchpads | The navigation iteration adds default left-drag Pan mode, horizontal scrolling, explicit Select mode, and a recent-data viewport. Automated pointer coverage is available; confirmation on the user’s physical touchpad/session remains pending. Navigation remains bounded to today’s loaded samples; see [chart navigation](chart-navigation.md). |
+| Touchpad zoom / pinch and physical input | Linux touchpad zoom is user-reported as not working as expected. Horizontal scrolling and mouse-wheel zoom handlers exist, but pinch/precision-touchpad support is unresolved; Windows input parity also needs checking next iteration. Use zoom buttons or +/- keys for now. See [the next scope](NEXT-ITERATION.md) and [chart navigation](chart-navigation.md). |
+| Application language | The GUI is currently mainly English. A complete Chinese README is available; Simplified Chinese application UI and saved language selection are next-iteration work. |
 
 ## Validation still requiring hardware
 
