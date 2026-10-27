@@ -20,7 +20,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../WattLedger.Desktop/AppText.cs" Link="Shared/AppText.cs" />
+    <Compile Include="../WattLedger.Desktop/LanguagePreference.cs" Link="Shared/LanguagePreference.cs" />
+    <EmbeddedResource Include="../WattLedger.Desktop/Strings.zh-CN.json" LogicalName="WattLedger.Desktop.Strings.zh-CN.json" WithCulture="false" />
     <Compile Include="../WattLedger.Desktop/ThemePreference.cs" Link="ThemePreference.cs" />
+    <Compile Include="../WattLedger.Desktop/ChartGestureScale.cs" Link="Shared/ChartGestureScale.cs" />
     <Compile Include="../WattLedger.Desktop/ChartSeries.cs" Link="Shared/ChartSeries.cs" />
     <Compile Include="../WattLedger.Desktop/PowerChartLayout.cs" Link="Shared/PowerChartLayout.cs" />
     <Compile Include="../WattLedger.Desktop/DashboardDataLoader.cs" Link="Shared/DashboardDataLoader.cs" />

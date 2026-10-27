@@ -4,6 +4,9 @@ using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Templates;
+using Avalonia.Data;
+using Avalonia.Data.Converters;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -45,17 +48,18 @@ internal sealed class MainWindow : Window
     private readonly TextBlock _sampleCount = DetailText("No samples yet");
     private readonly StackPanel _ledgerRows = new() { Spacing = 0 };
     private readonly PowerChart _chart = new();
-    private Button? _panModeButton;
-    private Button? _selectModeButton;
+    private ComboBox? _chartModeSelector;
+    private ComboBox? _languageSelector;
+    private ComboBox? _themeSelector;
     private Button? _followLiveButton;
-    private Button? _earlierButton;
-    private Button? _laterButton;
+    private MenuItem? _earlierMenuItem;
+    private MenuItem? _laterMenuItem;
     private readonly TextBlock _chartNavigationHint = DetailText("Pan mode: drag left/right to explore today's data.");
     private readonly TextBlock _chartRange = DetailText("Waiting for samples");
     private readonly TextBlock _selectionSummary = DetailText("Choose Select and drag across the chart, or enter two times to calculate a range.");
     private readonly TextBox _selectionStart = new() { PlaceholderText = "HH:mm:ss", Width = 98, FontSize = 11 };
     private readonly TextBox _selectionEnd = new() { PlaceholderText = "HH:mm:ss", Width = 98, FontSize = 11 };
-    private readonly Button _startupButton;
+    private readonly MenuItem _startupMenuItem;
     private readonly TrayIcon _trayIcon;
     private readonly DispatcherTimer _reportRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(350) };
     private readonly TrayHostDetector _trayHostDetector;
@@ -70,6 +74,9 @@ internal sealed class MainWindow : Window
     private Task _exportTask = Task.CompletedTask;
     private bool _exportInProgress;
     private string? _startupError;
+    private DashboardSnapshot? _lastSnapshot;
+    private string _platformTemplate = "";
+    private object?[] _platformArguments = [];
     private DateTimeOffset _lastReportRefreshUtc;
     private DateTimeOffset _lastRecordedTimestamp;
     internal IReadOnlyList<PowerPoint> ChartSamples => _chart.Samples;
@@ -88,7 +95,7 @@ internal sealed class MainWindow : Window
         _monitorTrayHost = monitorTrayHost;
         _trayHostDetector = trayHostDetector ?? new TrayHostDetector();
         _shutdown = shutdown;
-        _startupButton = ActionButton(StartupRegistration.IsEnabled ? "Disable start at login" : "Start at login", ToggleStartup);
+        _startupMenuItem = ActionMenuItem(StartupRegistration.IsEnabled ? "Disable start at login" : "Start at login", ToggleStartup);
         Title = "WattLedger";
         Width = 1120;
         Height = 800;
@@ -107,6 +114,8 @@ internal sealed class MainWindow : Window
         Closed += OnClosed;
         _reportRefreshTimer.Tick += OnReportRefresh;
         _trayHostDetector.AvailabilityChanged += OnTrayHostAvailabilityChanged;
+        AppText.LanguageChanged += OnLanguageChanged;
+        if (Application.Current is App app) app.ThemeChanged += OnThemeChanged;
         _chart.SelectionChanged += (_, _) => UpdateSelectionSummary();
         _chart.ViewChanged += (_, _) => UpdateChartRange();
         PropertyChanged += (_, args) =>
@@ -126,15 +135,57 @@ internal sealed class MainWindow : Window
     public void SetStartupError(string message) => Post(() =>
     {
         _startupError = message;
-        _status.Text = message;
-        _powerState.Text = "NOT RECORDING";
+        _status.Text = AppText.Format("Could not start sampling: {0}", message);
+        _powerState.Text = AppText.Get("NOT RECORDING");
         _powerState.Foreground = Brush("OrangeBrush");
         _powerStateDot.Background = Brush("OrangeBrush");
-        _trayIcon.ToolTipText = "WattLedger · not recording";
+        _trayIcon.ToolTipText = AppText.Get("WattLedger · not recording");
         ShowWindow();
     });
 
-    public void SetPlatformStatus(string message) => Post(() => _platformStatus.Text = message);
+    public void SetPlatformStatus(string message)
+    {
+        const string suspendError = "Could not update suspend state: ";
+        if (message.StartsWith(suspendError, StringComparison.Ordinal))
+            SetPlatformError("Could not update suspend state: {0}", message[suspendError.Length..]);
+        else Post(() => SetPlatformMessage(message));
+    }
+
+    public void SetPlatformError(string template, params object?[] arguments) =>
+        Post(() => SetPlatformMessage(template, arguments));
+
+    private void SetPlatformMessage(string template, params object?[] arguments)
+    {
+        _platformTemplate = template;
+        _platformArguments = arguments;
+        _platformStatus.Text = AppText.Format(template, arguments);
+    }
+
+    private void OnThemeChanged(object? sender, EventArgs args) => Post(() =>
+    {
+        if (Application.Current is App app && _themeSelector is not null && !Equals(_themeSelector.SelectedItem, app.CurrentThemeMode))
+            _themeSelector.SelectedItem = app.CurrentThemeMode;
+    });
+
+    private void OnLanguageChanged(object? sender, EventArgs args) => Post(() =>
+    {
+        _trayIcon.Menu = CreateTrayMenu();
+        if (_languageSelector is not null && !Equals(_languageSelector.SelectedItem, AppText.CurrentLanguage))
+            _languageSelector.SelectedItem = AppText.CurrentLanguage;
+        _startupMenuItem.Header = AppText.Get(StartupRegistration.IsEnabled ? "Disable start at login" : "Start at login");
+        _platformStatus.Text = AppText.Format(_platformTemplate, _platformArguments);
+        if (_lastSnapshot is not null) ApplyReport(_lastSnapshot, updateSamples: false);
+        if (_startupError is not null)
+        {
+            _status.Text = AppText.Format("Could not start sampling: {0}", _startupError);
+            _powerState.Text = AppText.Get("NOT RECORDING");
+            _trayIcon.ToolTipText = AppText.Get("WattLedger · not recording");
+        }
+        else if (_latestStatus is not null) ApplyStatus(_latestStatus);
+        _chart.RefreshLanguage();
+        UpdateChartRange();
+        UpdateSelectionSummary();
+    });
 
     private Control CreateContent()
     {
@@ -162,14 +213,14 @@ internal sealed class MainWindow : Window
     {
         var title = new TextBlock
         {
-            Text = "WattLedger",
+            [!TextBlock.TextProperty] = Localized("WattLedger"),
             FontSize = 25,
             FontWeight = FontWeight.SemiBold,
             Foreground = Brush("TextBrush")
         };
         var sub = new TextBlock
         {
-            Text = "Local-first battery energy journal",
+            [!TextBlock.TextProperty] = Localized("Local-first battery energy journal"),
             FontSize = 12,
             Foreground = Brush("MutedBrush"),
             Margin = new Thickness(0, 3, 0, 0)
@@ -222,7 +273,7 @@ internal sealed class MainWindow : Window
         var stack = new StackPanel { Spacing = 5 };
         stack.Children.Add(new TextBlock
         {
-            Text = label,
+            [!TextBlock.TextProperty] = Localized(label),
             FontSize = 10,
             FontWeight = FontWeight.SemiBold,
             Foreground = Brush("MutedBrush")
@@ -255,32 +306,53 @@ internal sealed class MainWindow : Window
         legend.Children.Add(LegendItem("Battery", "BlueBrush"));
         Grid.SetColumn(legend, 1);
         header.Children.Add(legend);
-        var tools = new WrapPanel();
-        _panModeButton = ActionButton("Pan ✓", () => _chart.InteractionMode = ChartInteractionMode.Pan);
-        _selectModeButton = ActionButton("Select", () => _chart.InteractionMode = ChartInteractionMode.Select);
-        _earlierButton = ActionButton("← Earlier", () => _chart.Pan(-_chart.VisibleRange.Seconds * .2));
-        _laterButton = ActionButton("Later →", () => _chart.Pan(_chart.VisibleRange.Seconds * .2));
+        var tools = new WrapPanel { Name = "ChartToolbar" };
+        _chartModeSelector = new ComboBox
+        {
+            Name = "ChartModeSelector",
+            ItemsSource = Enum.GetValues<ChartInteractionMode>(),
+            ItemTemplate = new FuncDataTemplate<ChartInteractionMode>((mode, _) => DetailText(mode.ToString())),
+            SelectedItem = _chart.InteractionMode,
+            MinWidth = 110,
+            Margin = new Thickness(0, 0, 8, 8)
+        };
+        _chartModeSelector.Bind(Avalonia.Automation.AutomationProperties.NameProperty, Localized("Chart interaction mode"));
+        _chartModeSelector.SelectionChanged += (_, _) =>
+        {
+            if (_chartModeSelector.SelectedItem is ChartInteractionMode mode && mode != _chart.InteractionMode)
+                _chart.InteractionMode = mode;
+        };
+        _chartModeSelector.Bind(ToolTip.TipProperty, new Binding(nameof(TextBlock.Text)) { Source = _chartNavigationHint });
+        _earlierMenuItem = ActionMenuItem("← Earlier", () => _chart.Pan(-_chart.VisibleRange.Seconds * .2));
+        _laterMenuItem = ActionMenuItem("Later →", () => _chart.Pan(_chart.VisibleRange.Seconds * .2));
         _followLiveButton = ActionButton("Following live ✓", _chart.FollowLive);
-        tools.Children.Add(_panModeButton);
-        tools.Children.Add(_selectModeButton);
-        tools.Children.Add(_earlierButton);
-        tools.Children.Add(_laterButton);
+        var zoomOut = ActionButton("−", () => _chart.Zoom(2));
+        zoomOut.Bind(ToolTip.TipProperty, Localized("Zoom −"));
+        zoomOut.Bind(Avalonia.Automation.AutomationProperties.NameProperty, Localized("Zoom −"));
+        var zoomIn = ActionButton("+", () => _chart.Zoom(.5));
+        zoomIn.Bind(ToolTip.TipProperty, Localized("Zoom +"));
+        zoomIn.Bind(Avalonia.Automation.AutomationProperties.NameProperty, Localized("Zoom +"));
+        tools.Children.Add(_chartModeSelector);
+        tools.Children.Add(zoomOut);
+        tools.Children.Add(zoomIn);
         tools.Children.Add(_followLiveButton);
-        tools.Children.Add(ActionButton("Zoom +", () => _chart.Zoom(0.5)));
-        tools.Children.Add(ActionButton("Zoom −", () => _chart.Zoom(2)));
-        tools.Children.Add(ActionButton("Fit today", _chart.ResetView));
-        tools.Children.Add(ActionButton("Fit selection", _chart.ZoomToSelection));
-        tools.Children.Add(ActionButton("Clear selection", _chart.ClearSelection));
+        tools.Children.Add(ActionMenu("More…",
+            _earlierMenuItem,
+            _laterMenuItem,
+            new Separator(),
+            ActionMenuItem("Fit today", _chart.ResetView),
+            ActionMenuItem("Fit selection", _chart.ZoomToSelection),
+            ActionMenuItem("Clear selection", _chart.ClearSelection)));
         var selection = new WrapPanel { Orientation = Orientation.Horizontal };
-        selection.Children.Add(new TextBlock { Text = "From", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8), FontSize = 11 });
+        selection.Children.Add(new TextBlock { [!TextBlock.TextProperty] = Localized("From"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8), FontSize = 11 });
         _selectionStart.Name = "SelectionStart";
         _selectionStart.Margin = new Thickness(0, 0, 8, 8);
-        Avalonia.Automation.AutomationProperties.SetName(_selectionStart, "Selection start time");
+        _selectionStart.Bind(Avalonia.Automation.AutomationProperties.NameProperty, Localized("Selection start time"));
         selection.Children.Add(_selectionStart);
-        selection.Children.Add(new TextBlock { Text = "to", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8), FontSize = 11 });
+        selection.Children.Add(new TextBlock { [!TextBlock.TextProperty] = Localized("to"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8), FontSize = 11 });
         _selectionEnd.Name = "SelectionEnd";
         _selectionEnd.Margin = new Thickness(0, 0, 8, 8);
-        Avalonia.Automation.AutomationProperties.SetName(_selectionEnd, "Selection end time");
+        _selectionEnd.Bind(Avalonia.Automation.AutomationProperties.NameProperty, Localized("Selection end time"));
         selection.Children.Add(_selectionEnd);
         selection.Children.Add(ActionButton("Calculate", SelectEnteredRange));
         _selectionSummary.Name = "SelectionSummary";
@@ -300,11 +372,26 @@ internal sealed class MainWindow : Window
                     CornerRadius = new CornerRadius(9),
                     Child = _chart
                 },
-                _chartNavigationHint,
-                DetailText("Horizontal scroll: pan · Vertical / Ctrl+wheel: zoom · Shift/middle drag: pan · Double-click / Home: fit today · End: follow live"),
-                selection,
                 _selectionSummary,
-                DetailText("Range estimates use recorded power rates; missing readings and sleep gaps are excluded. Ledger totals also use capacity calibration.")
+                new Expander
+                {
+                    Name = "SelectionAnalysis",
+                    [!Expander.HeaderProperty] = Localized("Selection analysis"),
+                    IsExpanded = false,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Content = new StackPanel
+                    {
+                        Spacing = 6,
+                        Children =
+                        {
+                            selection,
+                            DetailText("Range estimates use recorded power rates; missing readings and sleep gaps are excluded. Ledger totals also use capacity calibration."),
+                            _chartNavigationHint,
+                            DetailText("Horizontal scroll: pan · Vertical / Ctrl+wheel: zoom · Shift/middle drag: pan · Double-click / Home: fit today · End: follow live")
+                        }
+                    }
+                }
             }
         });
     }
@@ -314,28 +401,20 @@ internal sealed class MainWindow : Window
         var range = _chart.VisibleRange;
         var hasSamples = _chart.Samples.Count > 0;
         var fullRange = !_chart.CanPanEarlier && !_chart.CanPanLater;
-        var boundary = fullRange ? "All today's data fits; zoom in to pan" :
-            !_chart.CanPanEarlier ? "At the earliest recorded data" : !_chart.CanPanLater ? "At the latest recorded data" : "Earlier and later data available";
-        _chartRange.Text = !hasSamples ? "No recorded samples today" :
-            $"{(_chart.IsFollowingLive ? "Following live" : "View paused")} · {range.Start.ToLocalTime():HH:mm:ss} – {range.End.ToLocalTime():HH:mm:ss} · {_chart.Samples.Count:N0} points · {boundary}";
+        var boundary = fullRange ? AppText.Get("All today's data fits; zoom in to pan") :
+            !_chart.CanPanEarlier ? AppText.Get("At the earliest recorded data") : !_chart.CanPanLater ? AppText.Get("At the latest recorded data") : AppText.Get("Earlier and later data available");
+        _chartRange.Text = !hasSamples ? AppText.Get("No recorded samples today") :
+            AppText.Format("{0} · {1:HH:mm:ss} – {2:HH:mm:ss} · {3:N0} points · {4}", AppText.Get(_chart.IsFollowingLive ? "Following live" : "View paused"), range.Start.ToLocalTime(), range.End.ToLocalTime(), _chart.Samples.Count, boundary);
         _chartNavigationHint.Text = _chart.InteractionMode == ChartInteractionMode.Pan
-            ? "Pan mode: drag left/right to move through today's recorded data. Choose Select to measure a range."
-            : "Select mode: drag between two recorded points to calculate a range. Choose Pan to move the view.";
-        if (_panModeButton is not null)
-        {
-            _panModeButton.Content = _chart.InteractionMode == ChartInteractionMode.Pan ? "Pan ✓" : "Pan";
-            _panModeButton.IsEnabled = _chart.InteractionMode != ChartInteractionMode.Pan;
-        }
-        if (_selectModeButton is not null)
-        {
-            _selectModeButton.Content = _chart.InteractionMode == ChartInteractionMode.Select ? "Select ✓" : "Select";
-            _selectModeButton.IsEnabled = _chart.InteractionMode != ChartInteractionMode.Select;
-        }
-        if (_earlierButton is not null) _earlierButton.IsEnabled = hasSamples && _chart.CanPanEarlier;
-        if (_laterButton is not null) _laterButton.IsEnabled = hasSamples && _chart.CanPanLater;
+            ? AppText.Get("Pan mode: drag left/right to move through today's recorded data. Choose Select to measure a range.")
+            : AppText.Get("Select mode: drag between two recorded points to calculate a range. Choose Pan to move the view.");
+        if (_chartModeSelector is not null && !Equals(_chartModeSelector.SelectedItem, _chart.InteractionMode))
+            _chartModeSelector.SelectedItem = _chart.InteractionMode;
+        if (_earlierMenuItem is not null) _earlierMenuItem.IsEnabled = hasSamples && _chart.CanPanEarlier;
+        if (_laterMenuItem is not null) _laterMenuItem.IsEnabled = hasSamples && _chart.CanPanLater;
         if (_followLiveButton is not null)
         {
-            _followLiveButton.Content = _chart.IsFollowingLive ? "Following live ✓" : "Follow live";
+            _followLiveButton.Content = _chart.IsFollowingLive ? AppText.Get("Following live ✓") : AppText.Get("Follow live");
             _followLiveButton.IsEnabled = hasSamples && !_chart.IsFollowingLive;
         }
     }
@@ -345,8 +424,8 @@ internal sealed class MainWindow : Window
         var stats = _chart.Selection;
         if (stats is null)
         {
-            _selectionStart.Text = _selectionEnd.Text = "";
-            _selectionSummary.Text = "Choose Select and drag across the chart, or enter two times to calculate a range.";
+            _selectionStart.Text = _selectionEnd.Text = AppText.Get("");
+            _selectionSummary.Text = AppText.Get("Choose Select and drag across the chart, or enter two times to calculate a range.");
             return;
         }
         if (!_selectionStart.IsFocused && !_selectionEnd.IsFocused)
@@ -355,12 +434,11 @@ internal sealed class MainWindow : Window
             _selectionEnd.Text = stats.End.ToLocalTime().ToString("HH:mm:ss");
         }
         var energy = stats.CoveredSeconds > 0
-            ? $"net {stats.NetEnergyWh:+0.000;-0.000;0.000} Wh · used {stats.DischargeEnergyWh:0.000} Wh · charged {stats.ChargeEnergyWh:0.000} Wh · avg {stats.AverageWatts:0.00} W"
-            : "No continuous power readings in this range";
-        _selectionSummary.Text = $"{stats.SampleCount:N0} points · {ReportBuilder.FormatDuration(stats.DurationSeconds)} · {energy}\n" +
-                                 $"Coverage {stats.Coverage:P1} ({ReportBuilder.FormatDuration(stats.CoveredSeconds)})" +
-                                 (stats.Coverage < 1 ? " · partial" : "") +
-                                 (stats.MinimumWatts is { } min && stats.MaximumWatts is { } max ? $" · min {min:0.00} / max {max:0.00} W" : "");
+            ? AppText.Format("net {0:+0.000;-0.000;0.000} Wh · used {1:0.000} Wh · charged {2:0.000} Wh · avg {3:0.00} W", stats.NetEnergyWh, stats.DischargeEnergyWh, stats.ChargeEnergyWh, stats.AverageWatts)
+            : AppText.Get("No continuous power readings in this range");
+        _selectionSummary.Text = AppText.Format("{0:N0} points · {1} · {2}\nCoverage {3:P1} ({4})", stats.SampleCount, ReportBuilder.FormatDuration(stats.DurationSeconds), energy, stats.Coverage, ReportBuilder.FormatDuration(stats.CoveredSeconds)) +
+                                 (stats.Coverage < 1 ? AppText.Get(" · partial") : "") +
+                                 (stats.MinimumWatts is { } min && stats.MaximumWatts is { } max ? AppText.Format(" · min {0:0.00} / max {1:0.00} W", min, max) : "");
     }
 
     private void SelectEnteredRange()
@@ -369,7 +447,7 @@ internal sealed class MainWindow : Window
         if (!TimeOnly.TryParseExact(_selectionStart.Text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var start) ||
             !TimeOnly.TryParseExact(_selectionEnd.Text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var end) || end <= start)
         {
-            _selectionSummary.Text = "Enter two times as HH:mm or HH:mm:ss, with the end after the start. Both times must stay within the same day; ranges crossing midnight are not supported.";
+            _selectionSummary.Text = AppText.Get("Enter two times as HH:mm or HH:mm:ss, with the end after the start. Both times must stay within the same day; ranges crossing midnight are not supported.");
             return;
         }
         var date = _chart.Samples.Count > 0 ? DateOnly.FromDateTime(_chart.Samples[0].Timestamp.LocalDateTime) : DateOnly.FromDateTime(DateTime.Today);
@@ -377,7 +455,7 @@ internal sealed class MainWindow : Window
         var to = new DateTimeOffset(date.ToDateTime(end, DateTimeKind.Local));
         if (_chart.Samples.Count == 0 || to < _chart.Samples[0].Timestamp || from > _chart.Samples[^1].Timestamp)
         {
-            _selectionSummary.Text = "Choose a range that overlaps today's recorded samples.";
+            _selectionSummary.Text = AppText.Get("Choose a range that overlaps today's recorded samples.");
             return;
         }
         _chart.SelectRange(from, to);
@@ -393,7 +471,7 @@ internal sealed class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Background = Brush(color)
         });
-        row.Children.Add(new TextBlock { Text = label, FontSize = 11, Foreground = Brush("MutedBrush") });
+        row.Children.Add(new TextBlock { [!TextBlock.TextProperty] = Localized(label), FontSize = 11, Foreground = Brush("MutedBrush") });
         return row;
     }
 
@@ -434,14 +512,18 @@ internal sealed class MainWindow : Window
     private Control CreateFooter()
     {
         var bar = new WrapPanel();
-        bar.Children.Add(ActionButton("Export CSV", () => ExportAsync("csv")));
-        bar.Children.Add(ActionButton("Export Markdown", () => ExportAsync("md")));
-        bar.Children.Add(ActionButton("Export JSON", () => ExportAsync("json")));
-        bar.Children.Add(ActionButton("Open data folder", OpenDataFolder));
-        bar.Children.Add(_startupButton);
-        bar.Children.Add(ActionButton("Hide to tray", HideToTrayAsync));
-        bar.Children.Add(ActionButton("Quit", Quit));
+        bar.Children.Add(ActionMenu("Application",
+            ActionMenuItem("Export CSV", () => ExportAsync("csv")),
+            ActionMenuItem("Export Markdown", () => ExportAsync("md")),
+            ActionMenuItem("Export JSON", () => ExportAsync("json")),
+            new Separator(),
+            ActionMenuItem("Open data folder", OpenDataFolder),
+            _startupMenuItem,
+            new Separator(),
+            ActionMenuItem("Hide to tray", HideToTrayAsync),
+            ActionMenuItem("Quit", Quit)));
         bar.Children.Add(CreateThemeSelector());
+        bar.Children.Add(CreateLanguageSelector());
         var footer = new StackPanel { Spacing = 9 };
         footer.Children.Add(bar);
         footer.Children.Add(_status);
@@ -451,22 +533,23 @@ internal sealed class MainWindow : Window
 
     private Control CreateThemeSelector()
     {
-        var selector = new ComboBox
+        var selector = _themeSelector = new ComboBox
         {
             ItemsSource = Enum.GetValues<ThemeMode>(),
+            ItemTemplate = new FuncDataTemplate<ThemeMode>((mode, _) => DetailText(mode.ToString())),
             SelectedItem = (Application.Current as App)?.CurrentThemeMode ?? ThemeMode.System,
             Width = 112,
             Margin = new Thickness(0, 0, 8, 8)
         };
-        Avalonia.Automation.AutomationProperties.SetName(selector, "Color theme");
-        ToolTip.SetTip(selector, "Color theme: System follows the desktop appearance");
+        selector.Bind(Avalonia.Automation.AutomationProperties.NameProperty, Localized("Color theme"));
+        selector.Bind(ToolTip.TipProperty, Localized("Color theme: System follows the desktop appearance"));
         selector.SelectionChanged += (_, _) =>
         {
             if (Application.Current is not App app || selector.SelectedItem is not ThemeMode mode || mode == app.CurrentThemeMode) return;
             try { app.SetThemeMode(mode); }
             catch (Exception ex)
             {
-                _platformStatus.Text = $"Could not save theme preference: {ex.Message}";
+                SetPlatformMessage("Could not save theme preference: {0}", ex.Message);
                 selector.SelectedItem = app.CurrentThemeMode;
             }
         };
@@ -475,25 +558,88 @@ internal sealed class MainWindow : Window
             Orientation = Orientation.Horizontal,
             Children =
             {
-                new TextBlock { Text = "Theme", Foreground = Brush("MutedBrush"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8) },
+                new TextBlock { [!TextBlock.TextProperty] = Localized("Theme"), Foreground = Brush("MutedBrush"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8) },
                 selector
             }
         };
     }
 
+    private Control CreateLanguageSelector()
+    {
+        var selector = _languageSelector = new ComboBox
+        {
+            ItemsSource = Enum.GetValues<AppLanguage>(),
+            SelectedItem = AppText.CurrentLanguage,
+            Width = 132,
+            Margin = new Thickness(0, 0, 8, 8),
+            ItemTemplate = new FuncDataTemplate<AppLanguage>((language, _) =>
+                DetailText(language == AppLanguage.System ? "System" : language == AppLanguage.English ? "English" : "简体中文"))
+        };
+        selector.Bind(Avalonia.Automation.AutomationProperties.NameProperty, Localized("Language"));
+        selector.SelectionChanged += (_, _) =>
+        {
+            if (selector.SelectedItem is not AppLanguage language || language == AppText.CurrentLanguage) return;
+            try { AppText.SetLanguage(language); }
+            catch (Exception ex)
+            {
+                SetPlatformMessage("Could not save language preference: {0}", ex.Message);
+                selector.SelectedItem = AppText.CurrentLanguage;
+            }
+        };
+        return new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Children =
+            {
+                new TextBlock { [!TextBlock.TextProperty] = Localized("Language"), Foreground = Brush("MutedBrush"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8) },
+                selector
+            }
+        };
+    }
+
+    private static Binding Localized(string text) => new(nameof(AppText.Revision))
+    {
+        Source = AppText.Instance,
+        Converter = new FuncValueConverter<int, string>(_ => AppText.Get(text))
+    };
+
     private static TextBlock PanelHeading(string value) => new()
     {
-        Text = value,
+        [!TextBlock.TextProperty] = Localized(value),
         FontSize = 10,
         FontWeight = FontWeight.SemiBold,
         Foreground = Brush("MutedBrush")
+    };
+
+    private static MenuItem ActionMenuItem(string text, Action action)
+    {
+        var item = new MenuItem { [!MenuItem.HeaderProperty] = Localized(text) };
+        item.Click += (_, _) => action();
+        return item;
+    }
+
+    private static Menu ActionMenu(string text, params Control[] items) => new()
+    {
+        Margin = new Thickness(0, 0, 8, 8),
+        Background = Brush("ButtonBrush"),
+        Foreground = Brush("TextBrush"),
+        ItemsSource = new[]
+        {
+            new MenuItem
+            {
+                [!MenuItem.HeaderProperty] = Localized(text),
+                Padding = new Thickness(12, 7),
+                FontSize = 11,
+                ItemsSource = items
+            }
+        }
     };
 
     private static Button ActionButton(string text, Action action)
     {
         var button = new Button
         {
-            Content = text,
+            [!Button.ContentProperty] = Localized(text),
             Margin = new Thickness(0, 0, 8, 8),
             Padding = new Thickness(12, 7),
             FontSize = 11,
@@ -523,7 +669,7 @@ internal sealed class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _platformStatus.Text = $"System tray unavailable: {ex.Message}";
+            SetPlatformMessage("System tray unavailable: {0}", ex.Message);
         }
 
         return tray;
@@ -532,11 +678,11 @@ internal sealed class MainWindow : Window
     private NativeMenu CreateTrayMenu()
     {
         var menu = new NativeMenu();
-        var show = new NativeMenuItem("Open WattLedger");
+        var show = new NativeMenuItem(AppText.Get("Open WattLedger"));
         show.Click += (_, _) => ShowWindow();
-        var data = new NativeMenuItem("Open data folder");
+        var data = new NativeMenuItem(AppText.Get("Open data folder"));
         data.Click += (_, _) => OpenDataFolder();
-        var exit = new NativeMenuItem("Quit");
+        var exit = new NativeMenuItem(AppText.Get("Quit"));
         exit.Click += (_, _) => Quit();
         menu.Add(show);
         menu.Add(data);
@@ -560,7 +706,7 @@ internal sealed class MainWindow : Window
         catch (Exception ex)
         {
             _trayHostAvailable = false;
-            _platformStatus.Text = $"Could not confirm a tray host; window stays available. {ex.Message}";
+            SetPlatformMessage("Could not confirm a tray host; window stays available. {0}", ex.Message);
         }
     }
 
@@ -595,11 +741,11 @@ internal sealed class MainWindow : Window
         if (available)
         {
             HideToTray();
-            _platformStatus.Text = "WattLedger is still running in the system tray.";
+            SetPlatformMessage("WattLedger is still running in the system tray.");
         }
         else
         {
-            _platformStatus.Text = "No StatusNotifier host is available; closing WattLedger.";
+            SetPlatformMessage("No StatusNotifier host is available; closing WattLedger.");
             _allowClose = true;
             _shutdown();
         }
@@ -608,7 +754,7 @@ internal sealed class MainWindow : Window
     private void HideToTrayAsync()
     {
         if (_trayRegistered && _trayHostAvailable) HideToTray();
-        else _platformStatus.Text = "No StatusNotifier host is available; the window stays open.";
+        else SetPlatformMessage("No StatusNotifier host is available; the window stays open.");
     }
 
     private void HideToTray()
@@ -616,7 +762,7 @@ internal sealed class MainWindow : Window
         _reportRefresh.SetVisible(false);
         _reportRefreshTimer.Stop();
         Hide();
-        _platformStatus.Text = "WattLedger is still running in the system tray.";
+        SetPlatformMessage("WattLedger is still running in the system tray.");
     }
 
     private bool _trayHostDetectorStarted;
@@ -630,11 +776,11 @@ internal sealed class MainWindow : Window
         if (!available && !IsVisible && disappeared)
         {
             ShowWindow();
-            _platformStatus.Text = "System tray host disappeared; WattLedger window restored.";
+            SetPlatformMessage("System tray host disappeared; WattLedger window restored.");
         }
         else if (!available && IsVisible)
         {
-            _platformStatus.Text = "No StatusNotifier host found. WattLedger stays available in this window.";
+            SetPlatformMessage("No StatusNotifier host found. WattLedger stays available in this window.");
         }
     });
 
@@ -652,6 +798,8 @@ internal sealed class MainWindow : Window
     private async Task DisposeCoreAsync()
     {
         _disposed = true;
+        AppText.LanguageChanged -= OnLanguageChanged;
+        if (Application.Current is App app) app.ThemeChanged -= OnThemeChanged;
         _reportRefreshTimer.Stop();
         _reportRefreshTimer.Tick -= OnReportRefresh;
         _trayHostDetector.AvailabilityChanged -= OnTrayHostAvailabilityChanged;
@@ -700,8 +848,8 @@ internal sealed class MainWindow : Window
 
     private void OnError(object? sender, string message) => Post(() =>
     {
-        if (IsVisible) _status.Text = $"Sampling error: {message}";
-        else _trayIcon.ToolTipText = "WattLedger · sampling error";
+        if (IsVisible) _status.Text = AppText.Format("Sampling error: {0}", message);
+        else _trayIcon.ToolTipText = AppText.Get("WattLedger · sampling error");
     });
 
     private void ApplyStatus(LedgerStatus status)
@@ -727,41 +875,41 @@ internal sealed class MainWindow : Window
         _power.Foreground = Brush(battery.IsCharging ? "BlueBrush" : battery.IsDischarging ? "GreenBrush" : "MutedBrush");
         _powerDetail.Text = status.Rapl.PackageWatts is { } package
             ? $"SoC {package:0.0} W · CPU {status.Rapl.CpuWatts.GetValueOrDefault():0.0} W"
-            : power is not null ? estimatedPower ? "Estimated from capacity change" : battery.IsCharging ? "Battery charging" : "Battery discharge" : "Power rate unavailable";
+            : power is not null ? estimatedPower ? AppText.Get("Estimated from capacity change") : battery.IsCharging ? AppText.Get("Battery charging") : AppText.Get("Battery discharge") : AppText.Get("Power rate unavailable");
         _battery.Text = battery.Percent is { } percent ? $"{percent}%" : "—";
-        var health = battery.HealthPercent is { } h ? $" · {h:0}% health" : "";
-        if (battery.PercentIsEstimated) health += " · estimated";
+        var health = battery.HealthPercent is { } h ? AppText.Format(" · {0:0}% health", h) : "";
+        if (battery.PercentIsEstimated) health += AppText.Get(" · estimated");
         var capacity = battery.RemainingCapacityMwh is { } remaining && battery.FullChargeCapacityMwh is { } full
             ? $"{remaining / 1000d:0.0} / {full / 1000d:0.0} Wh"
-            : battery.DeviceName ?? "Capacity unavailable";
+            : battery.DeviceName ?? AppText.Get("Capacity unavailable");
         _batteryDetail.Text = capacity + health;
 
         if (battery.IsDischarging && status.EstimatedRemainingHours is { } hours)
         {
             _remaining.Text = $"{hours:0.0} h";
-            _remainingDetail.Text = status.RecentAverageWatts is { } average ? $"recent average {average:0.0} W" : "estimated remaining";
+            _remainingDetail.Text = status.RecentAverageWatts is { } average ? AppText.Format("recent average {0:0.0} W", average) : AppText.Get("estimated remaining");
         }
         else if (battery.IsCharging && battery.ChargeWatts is > 0.1 && battery.FullChargeCapacityMwh is { } fullCharge && battery.RemainingCapacityMwh is { } remainingCharge)
         {
             _remaining.Text = $"{Math.Max(0, (fullCharge - remainingCharge) / 1000d / battery.ChargeWatts.Value):0.0} h";
-            _remainingDetail.Text = "until full";
+            _remainingDetail.Text = AppText.Get("until full");
         }
         else
         {
-            _remaining.Text = battery.IsAcOnline ? "AC" : "—";
-            _remainingDetail.Text = battery.IsAcOnline ? "plugged in" : "waiting for discharge data";
+            _remaining.Text = battery.IsAcOnline ? AppText.Get("AC") : "—";
+            _remainingDetail.Text = battery.IsAcOnline ? AppText.Get("plugged in") : AppText.Get("waiting for discharge data");
         }
 
-        _powerState.Text = battery.BatteryCount == 0 ? "NO BATTERY"
-            : battery.IsCharging ? "CHARGING"
-            : battery.IsDischarging ? "ON BATTERY"
-            : battery.IsAcOnline ? "AC POWER" : "STATE UNKNOWN";
+        _powerState.Text = battery.BatteryCount == 0 ? AppText.Get("NO BATTERY")
+            : battery.IsCharging ? AppText.Get("CHARGING")
+            : battery.IsDischarging ? AppText.Get("ON BATTERY")
+            : battery.IsAcOnline ? AppText.Get("AC POWER") : AppText.Get("STATE UNKNOWN");
         var stateColor = battery.IsCharging || battery.IsAcOnline ? "BlueBrush" : battery.IsDischarging ? "GreenBrush" : "MutedBrush";
         _powerState.Foreground = Brush(stateColor);
         _powerStateDot.Background = Brush(stateColor);
         _status.Text = battery.IsCharging || battery.IsDischarging || battery.IsAcOnline
-            ? $"Recording locally · last sample {status.Timestamp.ToLocalTime():HH:mm:ss}"
-            : $"State unavailable · session tracking paused · last reading {status.Timestamp.ToLocalTime():HH:mm:ss}";
+            ? AppText.Format("Recording locally · last sample {0:HH:mm:ss}", status.Timestamp.ToLocalTime())
+            : AppText.Format("State unavailable · session tracking paused · last reading {0:HH:mm:ss}", status.Timestamp.ToLocalTime());
         _trayIcon.ToolTipText = $"WattLedger · {_battery.Text} · {_power.Text}";
     }
 
@@ -810,40 +958,46 @@ internal sealed class MainWindow : Window
                 _reportRefresh.MarkDirty();
                 return;
             }
-            var report = snapshot.Report;
-            _today.Text = $"{report.DischargeWh:0.0} Wh";
-            _todayDetail.Text = $"active {ReportBuilder.FormatDuration(report.ActiveSeconds)} · standby {ReportBuilder.FormatDuration(report.StandbySeconds)}" +
-                                (report.StandbyEnergyIncomplete ? " · some sleep-gap energy unavailable" : "");
-
-            _chart.Samples = snapshot.Samples;
-            UpdateChartRange();
-            _sampleCount.Text = $"{snapshot.Samples.Count:N0} samples";
-            _ledgerRows.Children.Clear();
-            foreach (var session in report.Sessions.Where(session => session.DurationSeconds > 0)
-                         .OrderByDescending(session => session.Start).Take(40))
-            {
-                _ledgerRows.Children.Add(LedgerRow(session));
-            }
-
-            if (report.Sessions.Count == 0)
-            {
-                _ledgerRows.Children.Add(new TextBlock
-                {
-                    Text = "Ledger entries appear as battery and charging sessions are recorded.",
-                    Foreground = Brush("MutedBrush"),
-                    FontSize = 11,
-                    Margin = new Thickness(12, 10)
-                });
-            }
+            _lastSnapshot = snapshot;
+            ApplyReport(snapshot);
         }
         catch (Exception ex)
         {
             _reportRefresh.MarkDirty();
-            if (!_disposed && _startupError is null) _status.Text = $"Report unavailable: {ex.Message}";
+            if (!_disposed && _startupError is null) _status.Text = AppText.Format("Report unavailable: {0}", ex.Message);
         }
         finally
         {
             if (CanRefresh && _reportRefresh.IsDirty) ScheduleReportRefresh();
+        }
+    }
+
+    private void ApplyReport(DashboardSnapshot snapshot, bool updateSamples = true)
+    {
+        var report = snapshot.Report;
+        _today.Text = $"{report.DischargeWh:0.0} Wh";
+        _todayDetail.Text = AppText.Format("active {0} · standby {1}", ReportBuilder.FormatDuration(report.ActiveSeconds), ReportBuilder.FormatDuration(report.StandbySeconds)) +
+                            (report.StandbyEnergyIncomplete ? AppText.Get(" · some sleep-gap energy unavailable") : "");
+
+        if (updateSamples) _chart.Samples = snapshot.Samples;
+        UpdateChartRange();
+        _sampleCount.Text = AppText.Format("{0:N0} samples", snapshot.Samples.Count);
+        _ledgerRows.Children.Clear();
+        foreach (var session in report.Sessions.Where(session => session.DurationSeconds > 0)
+                     .OrderByDescending(session => session.Start).Take(40))
+        {
+            _ledgerRows.Children.Add(LedgerRow(session));
+        }
+
+        if (report.Sessions.Count == 0)
+        {
+            _ledgerRows.Children.Add(new TextBlock
+            {
+                [!TextBlock.TextProperty] = Localized("Ledger entries appear as battery and charging sessions are recorded."),
+                Foreground = Brush("MutedBrush"),
+                FontSize = 11,
+                Margin = new Thickness(12, 10)
+            });
         }
     }
 
@@ -857,7 +1011,7 @@ internal sealed class MainWindow : Window
         string[] headings = ["START", "END", "STATE", "DURATION", "BATTERY", "ENERGY", "AVG W"];
         for (var index = 0; index < headings.Length; index++)
         {
-            var label = new TextBlock { Text = headings[index], FontSize = 9, Foreground = Brush("MutedBrush") };
+            var label = new TextBlock { [!TextBlock.TextProperty] = Localized(headings[index]), FontSize = 9, Foreground = Brush("MutedBrush") };
             Grid.SetColumn(label, index);
             grid.Children.Add(label);
         }
@@ -880,7 +1034,7 @@ internal sealed class MainWindow : Window
             $"{FormatPercent(session.StartPercent)} → {FormatPercent(session.EndPercent)}",
             (session.Type is "SleepGap" or "ModernStandby") &&
             session.Note?.Contains("energy unavailable", StringComparison.OrdinalIgnoreCase) == true
-                ? "Unavailable"
+                ? AppText.Get("Unavailable")
                 : $"{session.EnergyWh:0.00} Wh",
             FormatAverageWatts(session)
         };
@@ -903,16 +1057,16 @@ internal sealed class MainWindow : Window
     {
         if (session.Type == "ModernStandby")
         {
-            return "Modern Standby";
+            return AppText.Get("Modern Standby");
         }
 
         if (session.Type == "SleepGap")
         {
             var confirmed = session.Note?.Contains("Suspend/resume event confirmed", StringComparison.Ordinal) == true;
-            return confirmed ? "Sleep gap (confirmed)" : "Sleep gap (inferred)";
+            return confirmed ? AppText.Get("Sleep gap (confirmed)") : AppText.Get("Sleep gap (inferred)");
         }
 
-        return ReportBuilder.StateLabel(session.Type).Split('·')[0].Trim();
+        return AppText.SessionState(session.Type);
     }
 
     private static string FormatAverageWatts(SessionRecord session)
@@ -939,7 +1093,7 @@ internal sealed class MainWindow : Window
             };
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
-                Title = $"Export today as {format.ToUpperInvariant()}",
+                Title = AppText.Format("Export today as {0}", format.ToUpperInvariant()),
                 SuggestedFileName = $"wattledger-{DateTime.Today:yyyy-MM-dd}.{extension}",
                 FileTypeChoices = [type],
                 DefaultExtension = extension
@@ -947,7 +1101,7 @@ internal sealed class MainWindow : Window
             var path = file?.TryGetLocalPath();
             if (path is null || _disposed) return;
 
-            _status.Text = "Exporting…";
+            _status.Text = AppText.Get("Exporting…");
             var date = DateOnly.FromDateTime(DateTime.Today);
             var now = DateTimeOffset.Now;
             _exportTask = Task.Run(() =>
@@ -968,11 +1122,11 @@ internal sealed class MainWindow : Window
             });
             await _exportTask;
 
-            if (!_disposed) _status.Text = $"Exported to {path}";
+            if (!_disposed) _status.Text = AppText.Format("Exported to {0}", path);
         }
         catch (Exception ex)
         {
-            if (!_disposed) _status.Text = $"Export failed: {ex.Message}";
+            if (!_disposed) _status.Text = AppText.Format("Export failed: {0}", ex.Message);
         }
         finally
         {
@@ -997,7 +1151,7 @@ internal sealed class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _status.Text = $"Could not open data folder: {ex.Message}";
+            _status.Text = AppText.Format("Could not open data folder: {0}", ex.Message);
         }
     }
 
@@ -1006,12 +1160,12 @@ internal sealed class MainWindow : Window
         try
         {
             StartupRegistration.SetEnabled(!StartupRegistration.IsEnabled, _service.DatabasePath);
-            _startupButton.Content = StartupRegistration.IsEnabled ? "Disable start at login" : "Start at login";
-            _status.Text = StartupRegistration.IsEnabled ? "WattLedger will start at login." : "Start at login disabled.";
+            _startupMenuItem.Header = AppText.Get(StartupRegistration.IsEnabled ? "Disable start at login" : "Start at login");
+            _status.Text = AppText.Get(StartupRegistration.IsEnabled ? "WattLedger will start at login." : "Start at login disabled.");
         }
         catch (Exception ex)
         {
-            _status.Text = $"Could not update start-at-login setting: {ex.Message}";
+            _status.Text = AppText.Format("Could not update start-at-login setting: {0}", ex.Message);
         }
     }
 
@@ -1054,7 +1208,7 @@ internal sealed class MainWindow : Window
 
     private static TextBlock ValueText(string value, double size, string color) => new()
     {
-        Text = value,
+        [!TextBlock.TextProperty] = Localized(value),
         FontSize = size,
         FontWeight = FontWeight.SemiBold,
         Foreground = Brush(color)
@@ -1062,7 +1216,7 @@ internal sealed class MainWindow : Window
 
     private static TextBlock DetailText(string value) => new()
     {
-        Text = value,
+        [!TextBlock.TextProperty] = Localized(value),
         FontSize = 10,
         Foreground = Brush("MutedBrush"),
         TextWrapping = TextWrapping.Wrap

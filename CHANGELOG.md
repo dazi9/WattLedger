@@ -6,10 +6,15 @@ All notable changes to WattLedger are documented here. The format is based on [K
 
 ### Added
 
+- English / Simplified Chinese desktop language selection with a saved System mode and live chart, ledger, tray and error-context updates.
+- Native Wayland pointer-gestures pinch support through a pinned source-built Avalonia backend; fractional wheel and Windows native zoom translation share bounded scaling.
+
 - Chart boundary status on Windows matching Linux ("At the earliest recorded data", "At the latest recorded data", "All today's data fits; zoom in to pan", "Earlier and later data available").
 - Headless chart test covering the new click/drag follow-live rule; state-machine test documenting that drag-origin panning keeps follow-live until the control stops it.
 
 ### Changed
+
+- Compact desktop controls: Pan/Select selector, zoom, follow-live and More menu; collapsible manual selection and one Application menu for less frequent actions.
 
 - A plain click in pan mode no longer pauses follow-live on either desktop; the first actual drag movement pauses it, and the Windows and Linux charts share this rule.
 - Manually entered selection ranges crossing midnight are rejected with an explicit same-day explanation on both desktops (previously Linux rejected them with a generic message and the limitation was undocumented).
