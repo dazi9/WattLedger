@@ -80,6 +80,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ubuntu:24.04
+    defaults:
+      run:
+        shell: bash
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
@@ -111,7 +114,8 @@ jobs:
       - name: Resolve nightly version
         run: |
           base=$(grep -oP '(?<=<Version>)[^<]+' Directory.Build.props)
-          echo "EXTRA_VERSION_ARGS=-p:Version=${base}-nightly.$(date +%Y%m%d).${HEAD_SHA::7}" >> "$GITHUB_ENV"
+          short_sha=$(printf '%s' "$HEAD_SHA" | cut -c1-7)
+          echo "EXTRA_VERSION_ARGS=-p:Version=${base}-nightly.$(date +%Y%m%d).${short_sha}" >> "$GITHUB_ENV"
 
       - name: Publish CLI (self-contained, single file)
         run: >
@@ -178,7 +182,7 @@ jobs:
           (cd wattledger-linux-x64-ubuntu-24.04/cli-linux-x64 && zip -r "$D/wattledger-cli-linux-x64.zip" .)
           (cd wattledger-linux-x64-ubuntu-24.04/desktop-linux-x64 && zip -r "$D/wattledger-desktop-linux-x64.zip" .)
           cp wattledger-deb-linux-x64/wattledger-linux-x64.deb .
-          short_sha=${HEAD_SHA::7}
+          short_sha=$(printf '%s' "$HEAD_SHA" | cut -c1-7)
           {
             echo "## Nightly build"
             echo
@@ -200,7 +204,7 @@ jobs:
           gh release delete nightly --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
           gh release create nightly --repo "$GITHUB_REPOSITORY" \
             --target "$HEAD_SHA" \
-            --title "WattLedger nightly (${HEAD_SHA::7})" \
+            --title "WattLedger nightly (${short_sha})" \
             --prerelease \
             --notes-file dist/RELEASE_BODY.md \
             dist/wattledger-cli-win-x64.zip \
