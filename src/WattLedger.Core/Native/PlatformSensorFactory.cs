@@ -8,6 +8,7 @@ internal interface IPlatformSensorProvider : IDisposable
     IReadOnlyList<BatteryDeviceSnapshot> ReadBatteryDevices();
     RaplSnapshot ReadRapl();
     IReadOnlyDictionary<string, double> ReadRawEnergyMilliwatts();
+    IReadOnlyList<EnergyDomainSnapshot> ReadEnergyDomains();
     int? ReadBrightness(bool force = false);
     string? ReadForegroundProcess();
     string GapSessionType { get; }
@@ -41,6 +42,7 @@ internal static class PlatformSensorFactory
         public IReadOnlyList<BatteryDeviceSnapshot> ReadBatteryDevices() => _battery.Value.ReadDevices();
         public RaplSnapshot ReadRapl() => _energy.Value.Read();
         public IReadOnlyDictionary<string, double> ReadRawEnergyMilliwatts() => _energy.Value.ReadRawMilliwatts();
+        public IReadOnlyList<EnergyDomainSnapshot> ReadEnergyDomains() => Array.Empty<EnergyDomainSnapshot>();
         public int? ReadBrightness(bool force = false) => _brightness.Value.Read(force);
         public string? ReadForegroundProcess() => ForegroundProcessReader.GetName();
         public void Dispose()
@@ -52,12 +54,14 @@ internal static class PlatformSensorFactory
     private sealed class LinuxSensorProvider : IPlatformSensorProvider
     {
         private readonly LinuxBatteryReader _battery = new();
+        private readonly Lazy<LinuxPowercapReader> _powercap = new(() => new LinuxPowercapReader());
         public string GapSessionType => "SleepGap";
         public bool ShouldTrackSessions(BatterySnapshot battery) => LinuxShouldTrackSessions(battery);
         public BatterySnapshot ReadBattery() => _battery.Read();
         public IReadOnlyList<BatteryDeviceSnapshot> ReadBatteryDevices() => _battery.ReadDevices();
         public RaplSnapshot ReadRapl() => RaplSnapshot.Unavailable;
         public IReadOnlyDictionary<string, double> ReadRawEnergyMilliwatts() => new Dictionary<string, double>();
+        public IReadOnlyList<EnergyDomainSnapshot> ReadEnergyDomains() => _powercap.Value.Read();
         public int? ReadBrightness(bool force = false) => null;
         public string? ReadForegroundProcess() => null;
         public void Dispose() { }
@@ -71,6 +75,7 @@ internal static class PlatformSensorFactory
         public IReadOnlyList<BatteryDeviceSnapshot> ReadBatteryDevices() => Array.Empty<BatteryDeviceSnapshot>();
         public RaplSnapshot ReadRapl() => RaplSnapshot.Unavailable;
         public IReadOnlyDictionary<string, double> ReadRawEnergyMilliwatts() => new Dictionary<string, double>();
+        public IReadOnlyList<EnergyDomainSnapshot> ReadEnergyDomains() => Array.Empty<EnergyDomainSnapshot>();
         public int? ReadBrightness(bool force = false) => null;
         public string? ReadForegroundProcess() => null;
         public void Dispose() { }

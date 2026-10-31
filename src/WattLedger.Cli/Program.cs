@@ -476,6 +476,27 @@ internal static class Program
             AnsiConsole.Write(rapl);
         }
 
+        if (diagnostics.EnergyDomains.Count > 0)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold]Powercap energy domains (cumulative microjoules since boot)[/]");
+            var domains = new Table().Border(TableBorder.Rounded);
+            domains.AddColumn("Domain");
+            domains.AddColumn("Path");
+            domains.AddColumn(new TableColumn("Energy µJ").RightAligned());
+            domains.AddColumn(new TableColumn("Max range µJ").RightAligned());
+            foreach (var domain in diagnostics.EnergyDomains)
+            {
+                domains.AddRow(
+                    Markup.Escape(domain.Name),
+                    Markup.Escape(domain.Path),
+                    domain.EnergyUj is { } energy ? energy.ToString("N0", CultureInfo.InvariantCulture) : "unreadable",
+                    domain.MaxRangeUj is { } range ? range.ToString("N0", CultureInfo.InvariantCulture) : "—");
+            }
+
+            AnsiConsole.Write(domains);
+        }
+
         return 0;
     }
 

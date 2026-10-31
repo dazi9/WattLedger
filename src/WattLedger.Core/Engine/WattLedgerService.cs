@@ -56,6 +56,7 @@ public sealed class WattLedgerService : IDisposable
 
     public IReadOnlyList<BatteryDeviceSnapshot> ReadBatteryDevices() => _sensors.ReadBatteryDevices();
     public IReadOnlyDictionary<string, double> ReadRawEnergyMilliwatts() => _sensors.ReadRawEnergyMilliwatts();
+    public IReadOnlyList<EnergyDomainSnapshot> ReadEnergyDomains() => _sensors.ReadEnergyDomains();
     public int? ReadBrightnessForDiagnostics() => _sensors.ReadBrightness(force: true);
 
     /// <summary>Reads the current sensor state without initializing or writing the ledger.</summary>

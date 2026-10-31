@@ -601,6 +601,7 @@ public sealed class LinuxBatteryReaderTests
         public RaplSnapshot ReadRapl() => RaplSnapshot.Unavailable;
         public IReadOnlyDictionary<string, double> ReadRawEnergyMilliwatts() => new Dictionary<string, double>();
         public int? ReadBrightness(bool force = false) => null;
+        public System.Collections.Generic.IReadOnlyList<WattLedger.Core.Native.EnergyDomainSnapshot> ReadEnergyDomains() => Array.Empty<WattLedger.Core.Native.EnergyDomainSnapshot>();
         public string? ReadForegroundProcess() => null;
         public string GapSessionType => "SleepGap";
         public bool ShouldTrackSessions(BatterySnapshot battery) => shouldTrack(battery);
