@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using WattLedger.Core.Models;
+using WattLedger.Core.Processes;
 using WattLedger.Core.Time;
 
 namespace WattLedger.Core.Storage;
@@ -116,6 +117,40 @@ public sealed class LedgerDatabase
             CREATE INDEX IF NOT EXISTS ix_health_ts ON battery_health(ts);
             """;
         command.ExecuteNonQuery();
+        Migrate(connection);
+    }
+
+    /// <summary>Applies versioned schema migrations tracked by <c>PRAGMA user_version</c>.
+    /// Databases created before versioning report 0; each step below is additive and
+    /// idempotent so existing ledgers upgrade in place without touching their data.</summary>
+    private static void Migrate(SqliteConnection connection)
+    {
+        using var versionCommand = connection.CreateCommand();
+        versionCommand.CommandText = "PRAGMA user_version;";
+        var version = Convert.ToInt64(versionCommand.ExecuteScalar(), CultureInfo.InvariantCulture);
+
+        if (version < 1)
+        {
+            using var migration = connection.CreateCommand();
+            migration.CommandText = """
+                CREATE TABLE IF NOT EXISTS app_cpu_samples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    minute INTEGER NOT NULL,
+                    app_name TEXT NOT NULL,
+                    cpu_seconds REAL NOT NULL,
+                    process_count INTEGER NOT NULL,
+                    windows INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_app_cpu_samples_minute ON app_cpu_samples(minute);
+                CREATE INDEX IF NOT EXISTS ix_app_cpu_samples_name_minute ON app_cpu_samples(app_name, minute);
+                """;
+            migration.ExecuteNonQuery();
+
+            using var setVersion = connection.CreateCommand();
+            setVersion.CommandText = "PRAGMA user_version = 1;";
+            setVersion.ExecuteNonQuery();
+        }
     }
 
     public long InsertSample(SampleRecord sample)
@@ -343,6 +378,69 @@ public sealed class LedgerDatabase
             CycleCount = GetNullableInt(reader, 3),
             HealthPercent = GetNullableDouble(reader, 4)
         };
+    }
+
+    public void InsertAppCpuSamples(IReadOnlyList<AppCpuSample> samples)
+    {
+        ArgumentNullException.ThrowIfNull(samples);
+        if (samples.Count == 0)
+        {
+            return;
+        }
+
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO app_cpu_samples (minute, app_name, cpu_seconds, process_count, windows)
+            VALUES ($minute, $app_name, $cpu_seconds, $process_count, $windows);
+            """;
+        var minute = command.Parameters.Add("$minute", SqliteType.Integer);
+        var appName = command.Parameters.Add("$app_name", SqliteType.Text);
+        var cpuSeconds = command.Parameters.Add("$cpu_seconds", SqliteType.Real);
+        var processCount = command.Parameters.Add("$process_count", SqliteType.Integer);
+        var windows = command.Parameters.Add("$windows", SqliteType.Integer);
+
+        foreach (var sample in samples)
+        {
+            minute.Value = sample.Minute.ToUnixTimeMilliseconds();
+            appName.Value = sample.AppName;
+            cpuSeconds.Value = sample.CpuSeconds;
+            processCount.Value = sample.ProcessCount;
+            windows.Value = sample.Windows;
+            command.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    public IReadOnlyList<AppCpuTotal> GetAppCpuTotals(DateTimeOffset from, DateTimeOffset to)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT app_name, SUM(cpu_seconds), SUM(windows), MAX(process_count)
+            FROM app_cpu_samples
+            WHERE minute >= $from AND minute <= $to
+            GROUP BY app_name
+            ORDER BY SUM(cpu_seconds) DESC, app_name COLLATE NOCASE;
+            """;
+        command.Parameters.AddWithValue("$from", from.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("$to", to.ToUnixTimeMilliseconds());
+
+        var results = new List<AppCpuTotal>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            results.Add(new AppCpuTotal(
+                reader.GetString(0),
+                reader.GetDouble(1),
+                Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture),
+                Convert.ToInt32(reader.GetValue(3), CultureInfo.InvariantCulture)));
+        }
+
+        return results;
     }
 
     public IReadOnlyList<HealthRecord> GetHealthHistory(DateTimeOffset from, DateTimeOffset to)

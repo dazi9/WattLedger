@@ -50,8 +50,9 @@ internal static class Program
 
             return command switch
             {
-                "watch" => await RunWatchAsync(service),
-                "apps" => await RunAppsAsync(options),
+                "watch" => await RunWatchAsync(service, options),
+                "apps" => await RunAppsAsync(service, options),
+                "apps-report" => RunAppsReport(service, options),
                 "today" => RunReport(service, DateOnly.FromDateTime(DateTime.Now)),
                 "report" => RunReport(service, ParseDate(options.GetValueOrDefault("date"))),
                 "export" => RunExport(service, options),
@@ -119,7 +120,7 @@ internal static class Program
         return 0;
     }
 
-    private static async Task<int> RunWatchAsync(WattLedgerService service)
+    private static async Task<int> RunWatchAsync(WattLedgerService service, IReadOnlyDictionary<string, string> options)
     {
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, eventArgs) =>
@@ -157,6 +158,9 @@ internal static class Program
         };
 
         await service.StartAsync(cts.Token);
+        Task? appRecording = options.ContainsKey("apps")
+            ? RunAppRecordingAsync(service, cts.Token)
+            : null;
         try
         {
             await Task.Delay(Timeout.Infinite, cts.Token);
@@ -167,7 +171,75 @@ internal static class Program
         }
 
         await service.StopAsync();
+        if (appRecording is not null)
+        {
+            try
+            {
+                await appRecording;
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[red]App recording stopped with an error:[/] {Markup.Escape(ex.Message)}");
+            }
+        }
+
         return 0;
+    }
+
+    /// <summary>Opt-in per-application recording alongside the battery sampler: its own loop,
+    /// cadence and reader, so a slow process read never blocks <see cref="WattLedgerService.SampleOnce"/>.</summary>
+    private static async Task RunAppRecordingAsync(WattLedgerService service, CancellationToken cancellationToken)
+    {
+        var recorder = new ProcessResourceRecorder(service.Database, ProcessResourceProvider.Create());
+        recorder.MinuteRecorded += (minute, samples) =>
+        {
+            lock (ConsoleGate)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[grey]apps: minute {minute:HH:mm} recorded · {samples.Count} applications · {samples.Sum(sample => sample.CpuSeconds):0.0} CPU s[/]");
+            }
+        };
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    recorder.Collect();
+                }
+                catch (Exception ex)
+                {
+                    lock (ConsoleGate)
+                    {
+                        AnsiConsole.MarkupLine($"[red]App sampling error:[/] {Markup.Escape(ex.Message)}");
+                    }
+                }
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            try
+            {
+                recorder.Flush();
+            }
+            catch (Exception ex)
+            {
+                lock (ConsoleGate)
+                {
+                    AnsiConsole.MarkupLine($"[red]App recording flush failed:[/] {Markup.Escape(ex.Message)}");
+                }
+            }
+        }
     }
 
     private static int RunReport(WattLedgerService service, DateOnly date)
@@ -177,11 +249,12 @@ internal static class Program
         return 0;
     }
 
-    private static async Task<int> RunAppsAsync(IReadOnlyDictionary<string, string> options)
+    private static async Task<int> RunAppsAsync(WattLedgerService service, IReadOnlyDictionary<string, string> options)
     {
         var provider = ProcessResourceProvider.Create();
         var windowSeconds = ParseWindowSeconds(options.GetValueOrDefault("interval"));
         var top = ParseTopCount(options.GetValueOrDefault("top"));
+        var record = options.ContainsKey("record");
 
         AnsiConsole.Write(new Rule("[bold]WattLedger app CPU usage[/]").LeftJustified());
         AnsiConsole.MarkupLine("[grey]Resource usage only — not energy. First read is a baseline; "
@@ -196,11 +269,20 @@ internal static class Program
         var usages = tracker.Collect(provider.ReadCpuSnapshots());
         measured.Stop();
 
-        var apps = ProcessAppGrouper.Group(usages)
-            .Where(app => app.CpuSeconds > 0)
-            .Take(top)
-            .ToArray();
-        if (apps.Length == 0)
+        var apps = ProcessAppGrouper.Group(usages);
+        if (record)
+        {
+            // Storage keeps every application, not just the displayed leaderboard.
+            var now = DateTimeOffset.Now;
+            service.Database.InsertAppCpuSamples(apps
+                .Where(app => app.CpuSeconds > 0)
+                .Select(app => new AppCpuSample(ProcessResourceRecorder.MinuteKey(now), app.Name, app.CpuSeconds, app.ProcessCount, 1))
+                .ToArray());
+            AnsiConsole.MarkupLine($"[green]Recorded[/] {Markup.Escape(now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture))} to {Markup.Escape(service.DatabasePath)}");
+        }
+
+        var shown = apps.Where(app => app.CpuSeconds > 0).Take(top).ToArray();
+        if (shown.Length == 0)
         {
             AnsiConsole.MarkupLine("[yellow]No measurable CPU activity in the window.[/]");
             return 0;
@@ -212,7 +294,7 @@ internal static class Program
         table.AddColumn(new TableColumn("CPU time").RightAligned());
         table.AddColumn(new TableColumn("Avg cores").RightAligned());
         table.AddColumn(new TableColumn("Procs").RightAligned());
-        foreach (var app in apps)
+        foreach (var app in shown)
         {
             table.AddRow(
                 Markup.Escape(app.Name),
@@ -224,6 +306,38 @@ internal static class Program
         AnsiConsole.Write(table);
         AnsiConsole.MarkupLine(
             $"[grey]Window {window:0.00} s · “Avg cores” is CPU seconds divided by window length (1.00 = one full core).[/]");
+        return 0;
+    }
+
+    private static int RunAppsReport(WattLedgerService service, IReadOnlyDictionary<string, string> options)
+    {
+        var date = ParseDate(options.GetValueOrDefault("date"));
+        var top = ParseTopCount(options.GetValueOrDefault("top"));
+        var totals = service.Database.GetAppCpuTotals(LocalDay.Start(date), LocalDay.End(date));
+        if (totals.Count == 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]No recorded application CPU usage for {date:yyyy-MM-dd}. Record with `wattledger watch --apps` or `wattledger apps --record`.[/]");
+            return 0;
+        }
+
+        AnsiConsole.Write(new Rule($"[bold]Application CPU usage — {date:yyyy-MM-dd}[/]").LeftJustified());
+        var table = new Table().Border(TableBorder.Rounded);
+        table.AddColumn("Application");
+        table.AddColumn(new TableColumn("CPU time").RightAligned());
+        table.AddColumn(new TableColumn("Coverage").RightAligned());
+        table.AddColumn(new TableColumn("Peak procs").RightAligned());
+        foreach (var total in totals.Take(top))
+        {
+            table.AddRow(
+                Markup.Escape(total.Name),
+                $"{total.CpuSeconds:0.0} s",
+                total.Windows.ToString("N0", CultureInfo.InvariantCulture),
+                total.MaxProcessCount.ToString("N0", CultureInfo.InvariantCulture));
+        }
+
+        AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine("[grey]Recorded in per-minute aggregates; coverage shows how many sampled minutes contributed. Resource usage, not energy.[/]");
         return 0;
     }
 
@@ -493,9 +607,11 @@ internal static class Program
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[bold]Usage[/]");
         AnsiConsole.WriteLine("  wattledger status                 One-shot live status (default)");
-        AnsiConsole.WriteLine("  wattledger watch                  Record continuously and print samples");
-        AnsiConsole.WriteLine("  wattledger apps [--interval s] [--top n]");
+        AnsiConsole.WriteLine("  wattledger watch [--apps]         Record continuously and print samples; --apps also logs per-application CPU usage");
+        AnsiConsole.WriteLine("  wattledger apps [--interval s] [--top n] [--record]");
         AnsiConsole.WriteLine("                                    Per-application CPU usage over a short window (resource usage, not energy)");
+        AnsiConsole.WriteLine("  wattledger apps-report [--date yyyy-MM-dd] [--top n]");
+        AnsiConsole.WriteLine("                                    Show recorded per-application CPU usage for a day");
         AnsiConsole.WriteLine("  wattledger today                  Show today's energy ledger");
         AnsiConsole.WriteLine("  wattledger report --date 2026-10-20");
         AnsiConsole.WriteLine("  wattledger export --format csv|json|md --output report.csv [--date yyyy-MM-dd]");
