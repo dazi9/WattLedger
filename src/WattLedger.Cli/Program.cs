@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using Spectre.Console;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
+using WattLedger.Core.Processes;
 using WattLedger.Core.Reporting;
 using WattLedger.Core.Time;
 
@@ -49,6 +51,7 @@ internal static class Program
             return command switch
             {
                 "watch" => await RunWatchAsync(service),
+                "apps" => await RunAppsAsync(options),
                 "today" => RunReport(service, DateOnly.FromDateTime(DateTime.Now)),
                 "report" => RunReport(service, ParseDate(options.GetValueOrDefault("date"))),
                 "export" => RunExport(service, options),
@@ -172,6 +175,87 @@ internal static class Program
         var report = service.GetReport(date);
         PrintReport(report);
         return 0;
+    }
+
+    private static async Task<int> RunAppsAsync(IReadOnlyDictionary<string, string> options)
+    {
+        var provider = ProcessResourceProvider.Create();
+        var windowSeconds = ParseWindowSeconds(options.GetValueOrDefault("interval"));
+        var top = ParseTopCount(options.GetValueOrDefault("top"));
+
+        AnsiConsole.Write(new Rule("[bold]WattLedger app CPU usage[/]").LeftJustified());
+        AnsiConsole.MarkupLine("[grey]Resource usage only — not energy. First read is a baseline; "
+            + "processes that start and exit inside the window are missed.[/]");
+
+        var tracker = new ProcessCpuTracker();
+        // The window is the span between the two snapshot batches, so the stopwatch must
+        // cover both reads — dividing by the delay alone would inflate "Avg cores".
+        var measured = Stopwatch.StartNew();
+        tracker.Collect(provider.ReadCpuSnapshots());
+        await Task.Delay(TimeSpan.FromSeconds(windowSeconds));
+        var usages = tracker.Collect(provider.ReadCpuSnapshots());
+        measured.Stop();
+
+        var apps = ProcessAppGrouper.Group(usages)
+            .Where(app => app.CpuSeconds > 0)
+            .Take(top)
+            .ToArray();
+        if (apps.Length == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No measurable CPU activity in the window.[/]");
+            return 0;
+        }
+
+        var window = measured.Elapsed.TotalSeconds;
+        var table = new Table().Border(TableBorder.Rounded);
+        table.AddColumn("Application");
+        table.AddColumn(new TableColumn("CPU time").RightAligned());
+        table.AddColumn(new TableColumn("Avg cores").RightAligned());
+        table.AddColumn(new TableColumn("Procs").RightAligned());
+        foreach (var app in apps)
+        {
+            table.AddRow(
+                Markup.Escape(app.Name),
+                $"{app.CpuSeconds:0.00} s",
+                $"{app.CpuSeconds / window:0.00}",
+                app.ProcessCount.ToString(CultureInfo.InvariantCulture));
+        }
+
+        AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine(
+            $"[grey]Window {window:0.00} s · “Avg cores” is CPU seconds divided by window length (1.00 = one full core).[/]");
+        return 0;
+    }
+
+    private static double ParseWindowSeconds(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return 1.0;
+        }
+
+        if (!double.TryParse(value, CultureInfo.InvariantCulture, out var seconds) ||
+            seconds < 0.2 || seconds > 60)
+        {
+            throw new ArgumentException("--interval must be a number of seconds between 0.2 and 60");
+        }
+
+        return seconds;
+    }
+
+    private static int ParseTopCount(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return 10;
+        }
+
+        if (!int.TryParse(value, CultureInfo.InvariantCulture, out var top) || top is < 1 or > 100)
+        {
+            throw new ArgumentException("--top must be between 1 and 100");
+        }
+
+        return top;
     }
 
     private static int RunExport(WattLedgerService service, IReadOnlyDictionary<string, string> options)
@@ -410,6 +494,8 @@ internal static class Program
         AnsiConsole.MarkupLine("[bold]Usage[/]");
         AnsiConsole.WriteLine("  wattledger status                 One-shot live status (default)");
         AnsiConsole.WriteLine("  wattledger watch                  Record continuously and print samples");
+        AnsiConsole.WriteLine("  wattledger apps [--interval s] [--top n]");
+        AnsiConsole.WriteLine("                                    Per-application CPU usage over a short window (resource usage, not energy)");
         AnsiConsole.WriteLine("  wattledger today                  Show today's energy ledger");
         AnsiConsole.WriteLine("  wattledger report --date 2026-10-20");
         AnsiConsole.WriteLine("  wattledger export --format csv|json|md --output report.csv [--date yyyy-MM-dd]");
