@@ -32,3 +32,6 @@ artifacts/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local auto-deploy worktree (tools/update-local.ps1)
+.deploy/
