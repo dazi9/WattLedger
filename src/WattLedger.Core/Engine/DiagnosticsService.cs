@@ -16,6 +16,7 @@ public sealed record DiagnosticsReport
     public long SessionCount { get; init; }
     public IReadOnlyList<BatteryDeviceSnapshot> BatteryDevices { get; init; } = Array.Empty<BatteryDeviceSnapshot>();
     public IReadOnlyDictionary<string, double> RaplMilliwatts { get; init; } = new Dictionary<string, double>();
+    public IReadOnlyList<EnergyDomainSnapshot> EnergyDomains { get; init; } = Array.Empty<EnergyDomainSnapshot>();
     public int? BrightnessPercent { get; init; }
     public HealthRecord? Health { get; init; }
 }
@@ -36,6 +37,7 @@ public static class DiagnosticsService
             SessionCount = database.GetSessionCount(),
             BatteryDevices = service.ReadBatteryDevices(),
             RaplMilliwatts = service.ReadRawEnergyMilliwatts(),
+            EnergyDomains = service.ReadEnergyDomains(),
             BrightnessPercent = service.ReadBrightnessForDiagnostics(),
             Health = database.GetLatestHealth()
         };
