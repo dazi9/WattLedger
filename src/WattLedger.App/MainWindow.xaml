@@ -20,6 +20,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0">
@@ -162,7 +163,35 @@
             </Grid>
         </Border>
 
-        <WrapPanel Grid.Row="4" Margin="0,14,0,0">
+        <Border Grid.Row="4" Style="{StaticResource Card}" Margin="0,12,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <TextBlock Text="{local:Translate Text=&quot;Apps today&quot;}" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Text="{local:Translate Text=&quot;Resource usage; energy values are model estimates.&quot;}"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource SubtleText}" />
+                </Grid>
+
+                <DataGrid x:Name="AppsGrid" Height="150"
+                          Grid.Row="1"
+                          Margin="0,8,0,0"
+                          ItemsSource="{Binding Apps}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="{local:Translate Text=APP}" Binding="{Binding Name}" Width="*" />
+                        <DataGridTextColumn Header="{local:Translate Text=&quot;CPU time&quot;}" Binding="{Binding Cpu}" Width="120" />
+                        <DataGridTextColumn Header="{local:Translate Text=&quot;Est. energy&quot;}" Binding="{Binding Energy}" Width="240" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </Border>
+
+        <WrapPanel Grid.Row="5" Margin="0,14,0,0">
             <Button Content="{local:Translate Text=Application}" Click="OpenMenu_Click">
                 <Button.ContextMenu>
                     <ContextMenu Background="{DynamicResource CardBrush}" Foreground="{DynamicResource TextBrush}">

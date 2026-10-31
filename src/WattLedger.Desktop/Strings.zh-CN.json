@@ -197,5 +197,11 @@
   "Selection analysis": "选区分析",
   "Application": "应用",
   "No selection": "未选择选区",
-  "Chart help": "图表帮助"
+  "Chart help": "图表帮助",
+  "Apps today": "今日应用",
+  "APP": "应用",
+  "CPU time": "CPU 时间",
+  "Est. energy": "估算能耗",
+  "Resource usage; energy values are model estimates.": "资源用量；能耗为模型估算值。",
+  "No application usage recorded yet.": "尚未记录到应用用量。"
 }
