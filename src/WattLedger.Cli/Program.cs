@@ -5,6 +5,7 @@ using Spectre.Console;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
 using WattLedger.Core.Processes;
+using WattLedger.Core.Native;
 using WattLedger.Core.Reporting;
 using WattLedger.Core.Time;
 
@@ -159,7 +160,7 @@ internal static class Program
 
         await service.StartAsync(cts.Token);
         Task? appRecording = options.ContainsKey("apps")
-            ? RunAppRecordingAsync(service, cts.Token)
+            ? RunAppRecordingAsync(service, options, cts.Token)
             : null;
         try
         {
@@ -187,16 +188,44 @@ internal static class Program
     }
 
     /// <summary>Opt-in per-application recording alongside the battery sampler: its own loop,
-    /// cadence and reader, so a slow process read never blocks <see cref="WattLedgerService.SampleOnce"/>.</summary>
-    private static async Task RunAppRecordingAsync(WattLedgerService service, CancellationToken cancellationToken)
+    /// cadence and reader, so a slow process read never blocks <see cref="WattLedgerService.SampleOnce"/>.
+    /// On machines that expose powercap energy domains the same windows are attributed into
+    /// labelled per-application estimates; aggregate retention prunes on start.</summary>
+    private static async Task RunAppRecordingAsync(WattLedgerService service, IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken)
     {
-        var recorder = new ProcessResourceRecorder(service.Database, ProcessResourceProvider.Create());
+        var retentionDays = ParseRetentionDays(options.GetValueOrDefault("retention-days"));
+        if (retentionDays > 0)
+        {
+            var cutoff = DateTimeOffset.Now.AddDays(-retentionDays);
+            service.Database.PruneAppCpuSamples(cutoff);
+            service.Database.PruneAppEnergyEstimates(cutoff);
+            lock (ConsoleGate)
+            {
+                AnsiConsole.MarkupLine($"[grey]apps: aggregates older than {retentionDays} days pruned.[/]");
+            }
+        }
+
+        var provider = ProcessResourceProvider.Create();
+        // Energy domains exist only on Linux today; elsewhere attribution stays off.
+        Func<IReadOnlyList<EnergyDomainSnapshot>>? readEnergyDomains = OperatingSystem.IsLinux()
+            ? new LinuxPowercapReader().Read
+            : null;
+        var recorder = new ProcessResourceRecorder(service.Database, provider, readEnergyDomains: readEnergyDomains);
         recorder.MinuteRecorded += (minute, samples) =>
         {
             lock (ConsoleGate)
             {
                 AnsiConsole.MarkupLine(
                     $"[grey]apps: minute {minute:HH:mm} recorded · {samples.Count} applications · {samples.Sum(sample => sample.CpuSeconds):0.0} CPU s[/]");
+            }
+        };
+        recorder.EnergyRecorded += (minute, samples) =>
+        {
+            lock (ConsoleGate)
+            {
+                var sources = string.Join("/", samples.Select(sample => sample.EnergySource).Distinct());
+                AnsiConsole.MarkupLine(
+                    $"[grey]apps: minute {minute:HH:mm} estimates · {samples.Count} applications · {samples.Sum(sample => sample.EstimatedWh):0.000} Wh (估算 · {sources})[/]");
             }
         };
 
@@ -322,22 +351,33 @@ internal static class Program
         }
 
         AnsiConsole.Write(new Rule($"[bold]Application CPU usage — {date:yyyy-MM-dd}[/]").LeftJustified());
+        var energy = service.Database.GetAppEnergyTotals(LocalDay.Start(date), LocalDay.End(date))
+            .GroupBy(total => total.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => (Wh: group.Sum(total => total.EstimatedWh), Sources: string.Join("/", group.Select(total => total.EnergySource).Distinct())),
+                StringComparer.OrdinalIgnoreCase);
         var table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("Application");
         table.AddColumn(new TableColumn("CPU time").RightAligned());
+        table.AddColumn(new TableColumn("Est. energy").RightAligned());
         table.AddColumn(new TableColumn("Coverage").RightAligned());
         table.AddColumn(new TableColumn("Peak procs").RightAligned());
         foreach (var total in totals.Take(top))
         {
+            var estimate = energy.TryGetValue(total.Name, out var value)
+                ? $"{value.Wh:0.00} Wh · 估算 ({value.Sources})"
+                : "—";
             table.AddRow(
                 Markup.Escape(total.Name),
                 $"{total.CpuSeconds:0.0} s",
+                estimate,
                 total.Windows.ToString("N0", CultureInfo.InvariantCulture),
                 total.MaxProcessCount.ToString("N0", CultureInfo.InvariantCulture));
         }
 
         AnsiConsole.Write(table);
-        AnsiConsole.MarkupLine("[grey]Recorded in per-minute aggregates; coverage shows how many sampled minutes contributed. Resource usage, not energy.[/]");
+        AnsiConsole.MarkupLine("[grey]Est. energy is the app-cpu-share-v1 model estimate from powercap domains — always an estimate, never a measured ledger total. Coverage shows how many sampled windows contributed.[/]");
         return 0;
     }
 
@@ -370,6 +410,21 @@ internal static class Program
         }
 
         return top;
+    }
+
+    private static int ParseRetentionDays(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return 90;
+        }
+
+        if (!int.TryParse(value, CultureInfo.InvariantCulture, out var days) || days is < 0 or > 3650)
+        {
+            throw new ArgumentException("--retention-days must be between 0 and 3650 (0 keeps everything)");
+        }
+
+        return days;
     }
 
     private static int RunExport(WattLedgerService service, IReadOnlyDictionary<string, string> options)

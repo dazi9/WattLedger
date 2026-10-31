@@ -1,0 +1,211 @@
+name: nightly
+
+# Builds every merged commit on main and republishes the rolling "nightly"
+# prerelease with fresh assets and checksums. Stable releases keep their own
+# human-gated flow: a v* tag runs package.yml + release.yml (draft, manual publish).
+
+on:
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+    steps:
+      - name: Checkout the merged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve nightly version
+        run: |
+          $base = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
+          $shortSha = "$env:HEAD_SHA".Substring(0, 7)
+          Add-Content $env:GITHUB_ENV "EXTRA_VERSION_ARGS=-p:Version=$base-nightly.$(Get-Date -Format yyyyMMdd).$shortSha"
+
+      - name: Publish Windows CLI (self-contained, single file)
+        run: >
+          dotnet publish src/WattLedger.Cli/WattLedger.Cli.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o artifacts/cli-win-x64 $env:EXTRA_VERSION_ARGS
+
+      - name: Publish Windows desktop (self-contained, single file)
+        run: >
+          dotnet publish src/WattLedger.App/WattLedger.App.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o artifacts/desktop-win-x64 $env:EXTRA_VERSION_ARGS
+
+      - name: Upload Windows CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wattledger-cli-win-x64
+          path: artifacts/cli-win-x64
+          if-no-files-found: error
+
+      - name: Upload Windows desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wattledger-desktop-win-x64
+          path: artifacts/desktop-win-x64
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+    steps:
+      - name: Install container prerequisites
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl dbus dbus-x11 fonts-dejavu-core git libfontconfig1 libfreetype6 libice6 libsm6 libx11-6 libx11-xcb1 libxcursor1 libxinerama1 libxrandr2 libxrender1 libxi6 libwayland-client0 libwayland-cursor0 libwayland-egl1 libegl1 libgl1 libxkbcommon0 libicu-dev libssl-dev python3 x11-utils xauth xvfb zlib1g
+          if ! DEBIAN_FRONTEND=noninteractive apt-get install -y libgtk-3-0; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y libgtk-3-0t64
+          fi
+
+      - name: Checkout the merged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve nightly version
+        run: |
+          base=$(grep -oP '(?<=<Version>)[^<]+' Directory.Build.props)
+          echo "EXTRA_VERSION_ARGS=-p:Version=${base}-nightly.$(date +%Y%m%d).${HEAD_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Publish CLI (self-contained, single file)
+        run: >
+          dotnet publish src/WattLedger.Cli/WattLedger.Cli.csproj
+          -c Release -r linux-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o artifacts/cli-linux-x64 $EXTRA_VERSION_ARGS
+
+      - name: Publish Linux desktop (self-contained, single file)
+        run: >
+          dotnet publish src/WattLedger.Linux/WattLedger.Linux.csproj
+          -c Release -r linux-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o artifacts/desktop-linux-x64 $EXTRA_VERSION_ARGS
+
+      - name: Smoke-test Linux desktop startup under Xvfb
+        run: tools/smoke-linux.sh artifacts/desktop-linux-x64/WattLedger.Linux artifacts/cli-linux-x64/wattledger
+
+      - name: Build Debian package
+        run: tools/package-linux.sh artifacts/cli-linux-x64 artifacts/desktop-linux-x64 artifacts/wattledger-linux-x64.deb
+
+      - name: Upload Linux CLI and desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wattledger-linux-x64-ubuntu-24.04
+          path: |
+            artifacts/cli-linux-x64
+            artifacts/desktop-linux-x64
+          if-no-files-found: error
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: wattledger-deb-linux-x64
+          path: artifacts/wattledger-linux-x64.deb
+          if-no-files-found: error
+
+  publish-nightly:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Bundle release assets and checksums
+        run: |
+          cd dist
+          rm -rf release-checksums
+          D=$(pwd)
+          (cd wattledger-cli-win-x64 && zip -r "$D/wattledger-cli-win-x64.zip" .)
+          (cd wattledger-desktop-win-x64 && zip -r "$D/wattledger-desktop-win-x64.zip" .)
+          (cd wattledger-linux-x64-ubuntu-24.04/cli-linux-x64 && zip -r "$D/wattledger-cli-linux-x64.zip" .)
+          (cd wattledger-linux-x64-ubuntu-24.04/desktop-linux-x64 && zip -r "$D/wattledger-desktop-linux-x64.zip" .)
+          cp wattledger-deb-linux-x64/wattledger-linux-x64.deb .
+          short_sha=${HEAD_SHA::7}
+          {
+            echo "## Nightly build"
+            echo
+            echo "- Commit: ${HEAD_SHA}"
+            echo "- Built: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo "- This prerelease is replaced on every merge to \`main\`; stable releases remain the human-gated \`v*\` tags."
+            echo
+            echo "## 校验和 (SHA-256)"
+            echo
+            echo '```'
+            sha256sum wattledger-cli-win-x64.zip wattledger-desktop-win-x64.zip \
+              wattledger-cli-linux-x64.zip wattledger-desktop-linux-x64.zip \
+              wattledger-linux-x64.deb | tee checksums.txt
+            echo '```'
+          } > RELEASE_BODY.md
+
+      - name: Replace the rolling nightly prerelease
+        run: |
+          gh release delete nightly --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create nightly --repo "$GITHUB_REPOSITORY" \
+            --target "$HEAD_SHA" \
+            --title "WattLedger nightly (${HEAD_SHA::7})" \
+            --prerelease \
+            --notes-file dist/RELEASE_BODY.md \
+            dist/wattledger-cli-win-x64.zip \
+            dist/wattledger-desktop-win-x64.zip \
+            dist/wattledger-cli-linux-x64.zip \
+            dist/wattledger-desktop-linux-x64.zip \
+            dist/wattledger-linux-x64.deb \
+            dist/checksums.txt
