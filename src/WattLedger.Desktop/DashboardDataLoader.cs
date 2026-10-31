@@ -5,11 +5,18 @@ using WattLedger.Core.Time;
 
 namespace WattLedger.Desktop;
 
-internal sealed record DashboardSnapshot(DayReport Report, IReadOnlyList<PowerPoint> Samples);
+internal sealed record DashboardSnapshot(DayReport Report, IReadOnlyList<PowerPoint> Samples, IReadOnlyList<AppResourceRow> Apps);
+
+/// <summary>One pre-formatted row of the desktop "apps today" panel. Energy text is empty
+/// when no attribution exists (no powercap domains, or recording was off) — the UI renders
+/// a placeholder, never a fabricated zero.</summary>
+internal sealed record AppResourceRow(string Name, string Cpu, string Energy);
 
 /// <summary>Used by one background refresh at a time; only reads new samples after the initial load.</summary>
 internal sealed class DashboardDataLoader(WattLedgerService service)
 {
+    private const int MaxAppRows = 8;
+
     private readonly List<SampleRecord> _samples = [];
     private DateOnly? _date;
     private DateTimeOffset _lastRead;
@@ -62,6 +69,33 @@ internal sealed class DashboardDataLoader(WattLedgerService service)
             }
             points[i] = new PowerPoint(sample.Timestamp, sample.NetDischargeWatts, sample.BatteryPercent, breakBefore);
         }
-        return new DashboardSnapshot(report, points);
+        return new DashboardSnapshot(report, points, LoadAppRows(start, LocalDay.End(date)));
+    }
+
+    /// <summary>Top applications by recorded CPU time for the day, with attributed-energy
+    /// text when estimates exist. Empty (not placeholders) when nothing was recorded.</summary>
+    private IReadOnlyList<AppResourceRow> LoadAppRows(DateTimeOffset start, DateTimeOffset end)
+    {
+        var cpuTotals = service.Database.GetAppCpuTotals(start, end);
+        if (cpuTotals.Count == 0)
+        {
+            return Array.Empty<AppResourceRow>();
+        }
+
+        var energy = service.Database.GetAppEnergyTotals(start, end)
+            .GroupBy(total => total.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => (Wh: group.Sum(total => total.EstimatedWh), Sources: string.Join("/", group.Select(total => total.EnergySource).Distinct())),
+                StringComparer.OrdinalIgnoreCase);
+
+        return cpuTotals.Take(MaxAppRows)
+            .Select(total => energy.TryGetValue(total.Name, out var value)
+                ? new AppResourceRow(
+                    total.Name,
+                    ReportBuilder.FormatDuration(total.CpuSeconds),
+                    AppText.Format("{0:0.00} Wh · {1}", value.Wh, value.Sources))
+                : new AppResourceRow(total.Name, ReportBuilder.FormatDuration(total.CpuSeconds), ""))
+            .ToArray();
     }
 }

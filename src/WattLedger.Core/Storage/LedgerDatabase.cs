@@ -151,6 +151,31 @@ public sealed class LedgerDatabase
             setVersion.CommandText = "PRAGMA user_version = 1;";
             setVersion.ExecuteNonQuery();
         }
+
+        if (version < 2)
+        {
+            using var migration = connection.CreateCommand();
+            migration.CommandText = """
+                CREATE TABLE IF NOT EXISTS app_energy_estimates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    minute INTEGER NOT NULL,
+                    app_name TEXT NOT NULL,
+                    estimated_wh REAL NOT NULL,
+                    cpu_seconds REAL NOT NULL,
+                    energy_source TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    windows INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_app_energy_estimates_minute ON app_energy_estimates(minute);
+                CREATE INDEX IF NOT EXISTS ix_app_energy_estimates_name_minute ON app_energy_estimates(app_name, minute);
+                """;
+            migration.ExecuteNonQuery();
+
+            using var setVersion = connection.CreateCommand();
+            setVersion.CommandText = "PRAGMA user_version = 2;";
+            setVersion.ExecuteNonQuery();
+        }
     }
 
     public long InsertSample(SampleRecord sample)
@@ -338,6 +363,92 @@ public sealed class LedgerDatabase
         command.Parameters.AddWithValue("$to", to.ToUnixTimeMilliseconds());
         using var reader = command.ExecuteReader();
         return reader.Read() ? ReadSample(reader) : null;
+    }
+
+    public void InsertAppEnergySamples(IReadOnlyList<AppEnergySample> samples)
+    {
+        ArgumentNullException.ThrowIfNull(samples);
+        if (samples.Count == 0)
+        {
+            return;
+        }
+
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO app_energy_estimates (minute, app_name, estimated_wh, cpu_seconds, energy_source, model_version, windows)
+            VALUES ($minute, $app_name, $estimated_wh, $cpu_seconds, $energy_source, $model_version, $windows);
+            """;
+        var minute = command.Parameters.Add("$minute", SqliteType.Integer);
+        var appName = command.Parameters.Add("$app_name", SqliteType.Text);
+        var estimatedWh = command.Parameters.Add("$estimated_wh", SqliteType.Real);
+        var cpuSeconds = command.Parameters.Add("$cpu_seconds", SqliteType.Real);
+        var energySource = command.Parameters.Add("$energy_source", SqliteType.Text);
+        var modelVersion = command.Parameters.Add("$model_version", SqliteType.Text);
+        var windows = command.Parameters.Add("$windows", SqliteType.Integer);
+
+        foreach (var sample in samples)
+        {
+            minute.Value = sample.Minute.ToUnixTimeMilliseconds();
+            appName.Value = sample.AppName;
+            estimatedWh.Value = sample.EstimatedWh;
+            cpuSeconds.Value = sample.CpuSeconds;
+            energySource.Value = sample.EnergySource;
+            modelVersion.Value = sample.ModelVersion;
+            windows.Value = sample.Windows;
+            command.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    public IReadOnlyList<AppEnergyTotal> GetAppEnergyTotals(DateTimeOffset from, DateTimeOffset to)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT app_name, energy_source, SUM(estimated_wh), SUM(cpu_seconds), SUM(windows)
+            FROM app_energy_estimates
+            WHERE minute >= $from AND minute <= $to
+            GROUP BY app_name, energy_source
+            ORDER BY SUM(estimated_wh) DESC, app_name COLLATE NOCASE;
+            """;
+        command.Parameters.AddWithValue("$from", from.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("$to", to.ToUnixTimeMilliseconds());
+
+        var results = new List<AppEnergyTotal>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            results.Add(new AppEnergyTotal(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetDouble(2),
+                reader.GetDouble(3),
+                Convert.ToInt32(reader.GetValue(4), CultureInfo.InvariantCulture)));
+        }
+
+        return results;
+    }
+
+    /// <summary>Retention for the per-application aggregates, mirroring
+    /// <see cref="PruneSamples"/>; pass a cutoff to drop older minutes. The ledger's
+    /// session/sample tables are untouched.</summary>
+    public void PruneAppCpuSamples(DateTimeOffset before) =>
+        PruneMinuteTable("app_cpu_samples", before);
+
+    public void PruneAppEnergyEstimates(DateTimeOffset before) =>
+        PruneMinuteTable("app_energy_estimates", before);
+
+    private void PruneMinuteTable(string table, DateTimeOffset before)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"DELETE FROM {table} WHERE minute < $before;";
+        command.Parameters.AddWithValue("$before", before.ToUnixTimeMilliseconds());
+        command.ExecuteNonQuery();
     }
 
     public void InsertHealth(HealthRecord health)

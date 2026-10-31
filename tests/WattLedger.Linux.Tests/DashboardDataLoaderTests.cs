@@ -1,4 +1,5 @@
 using WattLedger.Desktop;
+using WattLedger.Core.Processes;
 using WattLedger.Core.Engine;
 using WattLedger.Core.Models;
 using WattLedger.Linux;
@@ -66,6 +67,32 @@ public sealed class DashboardDataLoaderTests
 
         Assert.Equal(2, snapshot.Samples.Count);
         Assert.Equal(7, snapshot.Samples[0].Watts);
+    }
+
+    [Fact]
+    public void Load_includes_top_app_rows_with_energy_text_when_available()
+    {
+        using var fixture = new Fixture();
+        var start = new DateTimeOffset(DateTime.Today).AddHours(1);
+        fixture.Service.Database.InsertAppCpuSamples(
+        [
+            new AppCpuSample(start, "worker", 60, 2, 3),
+            new AppCpuSample(start, "browser", 30, 1, 2)
+        ]);
+        fixture.Service.Database.InsertAppEnergySamples(
+        [
+            new AppEnergySample(start, "worker", 1.5, 60, "core (powercap)", AppEnergyAttribution.ModelVersion, 2)
+        ]);
+        var loader = new DashboardDataLoader(fixture.Service);
+
+        var snapshot = loader.Load(start);
+
+        Assert.Equal(2, snapshot.Apps.Count);
+        Assert.Equal("worker", snapshot.Apps[0].Name); // ordered by recorded CPU time
+        Assert.Equal("1m 0s", snapshot.Apps[0].Cpu);
+        Assert.Contains("1.50 Wh", snapshot.Apps[0].Energy);
+        // Without attribution the row renders a placeholder, never a fabricated zero.
+        Assert.Equal("", snapshot.Apps[1].Energy);
     }
 
     private sealed class Fixture : IDisposable

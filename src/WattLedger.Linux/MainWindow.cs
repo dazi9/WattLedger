@@ -47,6 +47,7 @@ internal sealed class MainWindow : Window
     };
     private readonly TextBlock _sampleCount = DetailText("No samples yet");
     private readonly StackPanel _ledgerRows = new() { Spacing = 0 };
+    private readonly StackPanel _appsRows = new() { Spacing = 0 };
     private readonly PowerChart _chart = new();
     private ComboBox? _chartModeSelector;
     private ComboBox? _languageSelector;
@@ -202,6 +203,7 @@ internal sealed class MainWindow : Window
                     CreateMetricGrid(),
                     CreateChartPanel(),
                     CreateLedgerPanel(),
+                    CreateAppsPanel(),
                     CreateFooter()
                 }
             }
@@ -507,6 +509,44 @@ internal sealed class MainWindow : Window
         };
         panel.Children.Add(ledger);
         return PanelBorder(panel);
+    }
+
+    private Control CreateAppsPanel()
+    {
+        var panel = new StackPanel { Spacing = 10 };
+        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        var heading = PanelHeading("Apps today");
+        heading.FontSize = 15;
+        heading.Foreground = Brush("TextBrush");
+        header.Children.Add(heading);
+        var note = DetailText("Resource usage; energy values are model estimates.");
+        note.HorizontalAlignment = HorizontalAlignment.Right;
+        Grid.SetColumn(note, 1);
+        header.Children.Add(note);
+        panel.Children.Add(header);
+
+        var content = new StackPanel { MinWidth = 650 };
+        content.Children.Add(AppsHeader());
+        content.Children.Add(_appsRows);
+        panel.Children.Add(content);
+        return PanelBorder(panel);
+    }
+
+    private static Control AppsHeader()
+    {
+        var grid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("2*,1*,1.4*"),
+            Margin = new Thickness(12, 0, 12, 5)
+        };
+        string[] headings = ["APP", "CPU time", "Est. energy"];
+        for (var index = 0; index < headings.Length; index++)
+        {
+            var label = new TextBlock { [!TextBlock.TextProperty] = Localized(headings[index]), FontSize = 9, Foreground = Brush("MutedBrush") };
+            Grid.SetColumn(label, index);
+            grid.Children.Add(label);
+        }
+        return grid;
     }
 
     private Control CreateFooter()
@@ -999,6 +1039,51 @@ internal sealed class MainWindow : Window
                 Margin = new Thickness(12, 10)
             });
         }
+
+        _appsRows.Children.Clear();
+        foreach (var app in snapshot.Apps)
+        {
+            _appsRows.Children.Add(AppsRow(app));
+        }
+
+        if (snapshot.Apps.Count == 0)
+        {
+            _appsRows.Children.Add(new TextBlock
+            {
+                [!TextBlock.TextProperty] = Localized("No application usage recorded yet."),
+                Foreground = Brush("MutedBrush"),
+                FontSize = 11,
+                Margin = new Thickness(12, 10)
+            });
+        }
+    }
+
+    private static Control AppsRow(AppResourceRow app)
+    {
+        var grid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("2*,1*,1.4*"),
+            Margin = new Thickness(12, 8, 12, 8)
+        };
+        var fields = new[]
+        {
+            app.Name,
+            app.Cpu,
+            string.IsNullOrEmpty(app.Energy) ? "—" : app.Energy
+        };
+        for (var index = 0; index < fields.Length; index++)
+        {
+            var text = new TextBlock { Text = fields[index], FontSize = 10, Foreground = Brush("TextBrush") };
+            Grid.SetColumn(text, index);
+            grid.Children.Add(text);
+        }
+
+        return new Border
+        {
+            BorderBrush = Brush("BorderBrush"),
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Child = grid
+        };
     }
 
     private static Control LedgerHeader()

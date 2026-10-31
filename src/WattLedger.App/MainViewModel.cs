@@ -36,6 +36,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private IReadOnlyList<PowerPoint> _chartSamples = Array.Empty<PowerPoint>();
     private string? _startupError;
     private DayReport? _lastReport;
+    private IReadOnlyList<AppResourceRow> _lastApps = Array.Empty<AppResourceRow>();
 
     public MainViewModel(WattLedgerService service)
     {
@@ -59,6 +60,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public event EventHandler? ChartUpdated;
 
     public ObservableCollection<SessionRow> Sessions { get; } = new();
+
+    public ObservableCollection<AppRow> Apps { get; } = new();
 
     public string PowerText
     {
@@ -166,7 +169,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             var snapshot = await Task.Run(() => _dataLoader.Load(DateTimeOffset.Now));
             var report = snapshot.Report;
-            ApplyReport(report);
+            ApplyReport(report, snapshot.Apps);
 
             ChartSamples = snapshot.Samples;
 
@@ -183,9 +186,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    private void ApplyReport(DayReport report)
+    private void ApplyReport(DayReport report, IReadOnlyList<AppResourceRow> apps)
     {
         _lastReport = report;
+        _lastApps = apps;
         TodayEnergyText = $"{report.DischargeWh:0.0} Wh";
         TodayDetailText = Format("active {0} · standby {1}", ReportBuilder.FormatDuration(report.ActiveSeconds), ReportBuilder.FormatDuration(report.StandbySeconds));
 
@@ -204,11 +208,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 $"{session.EnergyWh:0.00} Wh",
                 $"{session.AverageWatts:0.0} W"));
         }
+
+        Apps.Clear();
+        foreach (var app in apps)
+        {
+            Apps.Add(new AppRow(app.Name, app.Cpu, string.IsNullOrEmpty(app.Energy) ? "—" : app.Energy));
+        }
     }
 
     public void RefreshLanguage()
     {
-        if (_lastReport is { } report) ApplyReport(report);
+        if (_lastReport is { } report) ApplyReport(report, _lastApps);
         if (_startupError is not null) SetStartupFailure(_startupError);
         else if (_service.Latest is { } status) ApplyStatus(status);
         else
@@ -345,4 +355,6 @@ public sealed record SessionRow(
     string Battery,
     string Energy,
     string Average);
+
+public sealed record AppRow(string Name, string Cpu, string Energy);
 

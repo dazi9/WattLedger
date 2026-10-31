@@ -52,7 +52,7 @@ public sealed class ProcessResourceStorageTests
             var database = new LedgerDatabase(path);
             database.Initialize();
 
-            Assert.Equal(1, ReadUserVersion(path));
+            Assert.Equal(2, ReadUserVersion(path));
             Assert.Equal(1, database.GetSampleCount()); // The old ledger row survived the migration.
             database.InsertAppCpuSamples([Sample(0, "app", 1)]);
             Assert.Single(database.GetAppCpuTotals(DateTimeOffset.MinValue, DateTimeOffset.MaxValue));
