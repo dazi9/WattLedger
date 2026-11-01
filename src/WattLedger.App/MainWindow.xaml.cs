@@ -28,7 +28,14 @@ public partial class MainWindow : Window
     private bool _stopping;
     private bool _updatingPreferences;
     private string? _selectionError;
-    private sealed record PreferenceChoice(object Value, string Label);
+    // WPF cannot resolve DisplayMemberPath on members of this private nested record, so the
+    // theme/language combo boxes fell back to the raw record ToString. Overriding ToString
+    // makes the label the displayed text everywhere while SelectedValuePath keeps reading
+    // Value for the actual selection.
+    private sealed record PreferenceChoice(object Value, string Label)
+    {
+        public override string ToString() => Label;
+    }
     private Task _refreshTask = Task.CompletedTask;
     private Task _exportTask = Task.CompletedTask;
     private bool CanRefresh => !_stopping && IsVisible && WindowState != WindowState.Minimized;
