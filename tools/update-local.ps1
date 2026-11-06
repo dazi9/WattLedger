@@ -50,7 +50,17 @@ try {
         Invoke-Git worktree add --detach $deployDir origin/main | Out-Null
     }
 
-    Invoke-Git -C $deployDir fetch origin main | Out-Null
+    try
+    {
+        Invoke-Git -C $deployDir fetch origin main | Out-Null
+    }
+    catch
+    {
+        # The system git proxy (e.g. a local Clash/mihomo instance) can be down while the
+        # direct route works; retry once bypassing it so a dead proxy never stalls updates.
+        Write-Log "fetch through the configured proxy failed; retrying with proxy bypassed"
+        Invoke-Git -C $deployDir -c http.proxy= -c https.proxy= fetch origin main | Out-Null
+    }
     Invoke-Git -C $deployDir checkout --detach --quiet origin/main | Out-Null
     $sha = (Invoke-Git -C $deployDir rev-parse HEAD).Trim()
     if (-not $Force -and (Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $sha)) {

@@ -182,7 +182,6 @@ jobs:
           (cd wattledger-linux-x64-ubuntu-24.04/cli-linux-x64 && zip -r "$D/wattledger-cli-linux-x64.zip" .)
           (cd wattledger-linux-x64-ubuntu-24.04/desktop-linux-x64 && zip -r "$D/wattledger-desktop-linux-x64.zip" .)
           cp wattledger-deb-linux-x64/wattledger-linux-x64.deb .
-          short_sha=$(printf '%s' "$HEAD_SHA" | cut -c1-7)
           {
             echo "## Nightly build"
             echo
@@ -201,6 +200,8 @@ jobs:
 
       - name: Replace the rolling nightly prerelease
         run: |
+          # short_sha does not carry over from the bundle step; recompute it here.
+          short_sha=$(printf '%s' "$HEAD_SHA" | cut -c1-7)
           gh release delete nightly --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
           gh release create nightly --repo "$GITHUB_REPOSITORY" \
             --target "$HEAD_SHA" \
