@@ -57,6 +57,13 @@ jobs:
     steps:
       - name: Install container prerequisites
         run: |
+          # The Ubuntu archive over plain HTTP has been unreachable from some runners;
+          # switch the default sources to HTTPS (the base image ships ca-certificates).
+          for sources in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+            if [ -f "$sources" ]; then
+              sed -i 's|http://archive.ubuntu.com|https://archive.ubuntu.com|g; s|http://security.ubuntu.com|https://security.ubuntu.com|g' "$sources"
+            fi
+          done
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl dbus dbus-x11 fonts-dejavu-core git libfontconfig1 libfreetype6 libice6 libsm6 libx11-6 libx11-xcb1 libxcursor1 libxinerama1 libxrandr2 libxrender1 libxi6 libwayland-client0 libwayland-cursor0 libwayland-egl1 libegl1 libgl1 libxkbcommon0 libicu-dev libssl-dev python3 x11-utils xauth xvfb zlib1g
           if ! DEBIAN_FRONTEND=noninteractive apt-get install -y libgtk-3-0; then
