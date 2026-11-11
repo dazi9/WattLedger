@@ -7,6 +7,8 @@
 # - Builds happen in the dedicated ".deploy" git worktree pinned to origin/main,
 #   so the developer's working tree (any branch, any dirt) is never touched.
 # - A .deployed-commit marker skips work when nothing moved; -Force redeploys.
+# - An exclusive lock file serializes concurrent runs (scheduled task vs manual),
+#   observed to collide on the .deploy obj\ outputs; a second instance exits 0.
 # - Resource usage only ever touches this machine's own checkout — no downloads,
 #   no signature-less installs.
 
@@ -19,6 +21,7 @@ $appDir = Join-Path $repo 'artifacts\app'
 $stagingDir = Join-Path $repo 'artifacts\app-staging'
 $marker = Join-Path $appDir '.deployed-commit'
 $log = Join-Path $repo 'artifacts\update-local.log'
+$lockPath = Join-Path $repo 'artifacts\deploy.lock'
 
 function Write-Log([string]$message) {
     Add-Content -Path $log -Value ('{0} {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $message)
@@ -45,7 +48,20 @@ function Invoke-Git {
     }
 }
 
+$lock = $null
 try {
+    # Exclusive-handle lock file: a second instance (manual run overlapping the scheduled
+    # task) fails to open it, logs, and leaves quietly. A crashed run leaves the file but
+    # no handle, so the next run opens it cleanly.
+    New-Item -ItemType Directory -Force -Path (Split-Path $lockPath -Parent) | Out-Null
+    try {
+        $lock = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    }
+    catch [System.IO.IOException] {
+        Write-Log 'another deploy is already running; exiting'
+        exit 0
+    }
+
     if (-not (Test-Path (Join-Path $deployDir '.git'))) {
         Invoke-Git worktree add --detach $deployDir origin/main | Out-Null
     }
@@ -106,4 +122,8 @@ try {
 catch {
     Write-Log "ERROR: $_"
     exit 1
+}
+finally {
+    if ($lock) { $lock.Dispose() }
+    try { Remove-Item $lockPath -Force -ErrorAction SilentlyContinue } catch { }
 }

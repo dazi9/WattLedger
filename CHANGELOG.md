@@ -2,12 +2,16 @@
 
 All notable changes to WattLedger are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.1] - 2026-11-11
 
 ### Added
 
 - English / Simplified Chinese desktop language selection with a saved System mode and live chart, ledger, tray and error-context updates.
 - Native Wayland pointer-gestures pinch support through a pinned source-built Avalonia backend; fractional wheel and Windows native zoom translation share bounded scaling.
+- Per-application CPU usage tracking with PID-reuse protection, minute aggregates stored via additive versioned migrations, and a default 90-day retention policy (`wattledger apps`, `apps-report`, `watch --apps`).
+- `app-cpu-share-v1` energy attribution from Linux powercap domains, labelled as an estimate with its model version and energy source in the CLI and both desktop panels; Windows stays resource-usage-only until a matching power source is wired.
+- "Apps today" panels on the Windows and Linux dashboards showing recorded CPU time and attributed energy per application.
+- A rolling `nightly` prerelease built on every merge to main (checksums included), and a scheduled local auto-deploy that rebuilds and restarts the tray app when main advances.
 
 - Chart boundary status on Windows matching Linux ("At the earliest recorded data", "At the latest recorded data", "All today's data fits; zoom in to pan", "Earlier and later data available").
 - Headless chart test covering the new click/drag follow-live rule; state-machine test documenting that drag-origin panning keeps follow-live until the control stops it.
@@ -15,6 +19,8 @@ All notable changes to WattLedger are documented here. The format is based on [K
 ### Changed
 
 - Compact desktop controls: Pan/Select selector, zoom, follow-live and More menu; collapsible manual selection and one Application menu for less frequent actions.
+- CSV export neutralizes spreadsheet formula prefixes in text columns and quotes carriage returns.
+- Local deploys retry `git fetch` with the proxy bypassed when a configured local proxy is down; nightly prerelease titles include the short commit sha.
 
 - A plain click in pan mode no longer pauses follow-live on either desktop; the first actual drag movement pauses it, and the Windows and Linux charts share this rule.
 - Manually entered selection ranges crossing midnight are rejected with an explicit same-day explanation on both desktops (previously Linux rejected them with a generic message and the limitation was undocumented).
@@ -23,6 +29,8 @@ All notable changes to WattLedger are documented here. The format is based on [K
 
 ### Fixed
 
+- The theme and language selectors showed the raw record type name instead of their labels.
+- Linux test suite fixtures are portable across host platforms (pooled SQLite connections, POSIX-path assumptions, and UI-culture-dependent assertions).
 - Windows: the chart no longer rebuilds pens and looks up theme resources on every rendered frame (render assets are cached per layout and frozen); system-preference changes unrelated to appearance no longer re-apply the theme; post-await startup logic stays inside the guarded startup path; logoff/shutdown run the same stop path as an explicit exit; waiting for report/export work on exit is bounded to 5 seconds; `ExitApplication` can no longer skip `Shutdown` when cleanup throws.
 - Linux: hover movement only repaints when the hovered sample changes; horizontal wheel panning clamps large deltas the same way zooming does.
 - Theme preference saving tolerates unreadable settings files on all platforms and documents the non-atomic overwrite boundary on Unix.

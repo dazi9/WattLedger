@@ -168,14 +168,42 @@ dotnet run --project src/WattLedger.Cli -- diag
 
 and open an issue with the output (review it for personal data first).
 
-## 8. Future per-app attribution
+## 8. Per-application energy attribution (implemented; estimates only)
 
-A possible future approach, not implemented in the current release:
+The first attribution model, `app-cpu-share-v1`, is implemented and labelled as an
+estimate everywhere it appears (CLI, both desktop panels, stored rows). It is never summed
+into the measured ledger totals: the ledger remains the system-level ground truth, and the
+attribution is a separate, model-versioned layer.
 
-1. Sample each process's CPU time delta (`GetProcessTimes`) at the same cadence as the system sampler.
-2. Attribute CPU package power (`PP0`) proportionally to CPU time.
-3. Attribute GPU power using per-process GPU Engine counters where available.
-4. Keep display, storage, network, and platform power in an "unattributed" bucket.
-5. Label the result **estimated** everywhere; never present it as a measured per-app wattage.
+**Energy source.** On Linux, powercap energy domains (`/sys/class/powercap`) are read at
+the same sampling windows as process CPU time, and cumulative counters are diffed into
+per-window watt-hours (wraparound reconstructed only when `max_energy_range_uj` is
+declared; an unreadable reading clears the baseline so a gap can never smuggle a whole
+wrap cycle into one interval). The attribution pool is the `core` subdomain when present —
+the true CPU domain — and only falls back to package domains when flagged
+`package-level`, because a package may include non-CPU activity. Windows has no
+powercap-equivalent source wired yet, so Windows stays resource-usage-only.
 
-This is deliberately conservative: a useful estimate with an honest error bar is better than a fake precise number.
+**Model.** Per window: estimated Wh = pool Wh × app CPU seconds ÷ total observed CPU
+seconds. The denominator covers every observed process — the tracker sees all of them —
+so shares are never normalized across a hand-picked leaderboard.
+
+**Guardrails.**
+
+- No idle baseline is subtracted anywhere: idle and unattributable energy simply stay
+  unattributed. Machine-validated baselines are a prerequisite for any subtraction.
+- The remainder (uncore, graphics, DRAM) is reported separately and never added into
+  applications; the pool and its containing package domain are excluded from the
+  remainder so overlapping domains are never summed twice.
+- With no readable energy domain or no CPU activity in the window, attribution produces
+  nothing rather than an invented number.
+- Zero-usage instances and permission failures skip the instance, keeping that time in
+  the unattributed remainder instead of any application's number.
+
+**Storage.** Minute aggregates live in `app_cpu_samples` (resource) and
+`app_energy_estimates` (estimates with per-row model version and energy source), created
+by additive `PRAGMA user_version` migrations; aggregate retention defaults to 90 days.
+
+**Still not implemented:** per-process GPU attribution, baseline subtraction, and a
+quantified error bar — the model's accuracy is unvalidated until the controlled rundown
+comparison in section 7 is run with attribution enabled.
