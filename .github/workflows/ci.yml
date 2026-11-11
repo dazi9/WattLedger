@@ -57,6 +57,9 @@ jobs:
     steps:
       - name: Install container prerequisites
         run: |
+          # Some container runners intermittently fail to resolve the Ubuntu archive hosts
+          # through the embedded docker DNS; pin public resolvers so apt can fetch at all.
+          printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf || true
           # The Ubuntu archive over plain HTTP has been unreachable from some runners;
           # switch the default sources to HTTPS (the base image ships ca-certificates).
           for sources in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
